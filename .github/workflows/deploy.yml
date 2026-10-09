@@ -1,0 +1,27 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+        -   name: SSH deploy
+            uses: appleboy/ssh-action@v1
+            with:
+                host: ${{ secrets.SSH_HOST }}
+                username: ${{ secrets.SSH_USER }}
+                key: ${{ secrets.SSH_KEY }}
+                debug: true
+                script: |
+                    set -e
+                    echo "===== REMOTE START ====="
+                    cd ${{ secrets.DEPLOY_PATH }}
+                    git fetch origin main
+                    git reset --hard origin/main
+                    composer install --no-interaction --no-dev --prefer-dist --optimize-autoloader
+                    echo "===== REMOTE END ====="

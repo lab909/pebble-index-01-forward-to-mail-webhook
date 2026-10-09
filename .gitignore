@@ -1,0 +1,6 @@
+/.env
+/.env.local
+/vendor/
+/recordings/
+/logs/
+/.idea
