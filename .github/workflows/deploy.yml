@@ -20,7 +20,11 @@ jobs:
                 script: |
                     set -e
                     echo "===== REMOTE START ====="
-                    cd ${{ secrets.DEPLOY_PATH }}
+                    if [ ! -d "${{ secrets.DEPLOY_PATH }}/.git" ]; then
+                        echo "No repo found, cloning..."
+                        git clone https://github.com/${{ github.repository }}.git "${{ secrets.DEPLOY_PATH }}"
+                    fi
+                    cd "${{ secrets.DEPLOY_PATH }}"
                     git fetch origin main
                     git reset --hard origin/main
                     composer install --no-interaction --no-dev --prefer-dist --optimize-autoloader
