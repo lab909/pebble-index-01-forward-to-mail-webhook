@@ -2,7 +2,8 @@
 
 Requires PHP 8.2+, Composer, and PHP OpenSSL support. The receiver uses Symfony
 Mailer and Symfony Dotenv as standalone components; no Symfony application is
-needed.
+needed. Composer resolves dependencies against PHP 8.2 so the lock file also
+works on PHP 8.2 when dependencies are updated on a newer PHP installation.
 
 ## Install
 

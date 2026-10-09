@@ -11,5 +11,10 @@
         "psr-4": {
             "Pebble\\": "src/"
         }
+    },
+    "config": {
+        "platform": {
+            "php": "8.2.0"
+        }
     }
 }

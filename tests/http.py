@@ -1,5 +1,6 @@
 """Exercise the public endpoint with isolated configuration and a local TLS SMTP stub."""
 import json
+import os
 import pathlib
 import socket
 import ssl
@@ -70,7 +71,7 @@ with tempfile.TemporaryDirectory(prefix='pebble-http-') as directory:
         sock.bind(('127.0.0.1', 0))
         port = sock.getsockname()[1]
     with open(project / 'server.log', 'w') as log:
-        server = subprocess.Popen(['php', '-d', f'openssl.cafile={certificate}', '-S',
+        server = subprocess.Popen([os.environ.get('PHP_BINARY', 'php'), '-d', f'openssl.cafile={certificate}', '-S',
                                    f'127.0.0.1:{port}', '-t', str(project / 'public')],
                                   stdout=log, stderr=log)
         try:
