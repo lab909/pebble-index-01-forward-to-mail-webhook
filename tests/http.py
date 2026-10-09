@@ -85,9 +85,10 @@ with tempfile.TemporaryDirectory(prefix='pebble-http-') as directory:
             sample = project / 'sample.m4a'
             sample.write_bytes(b'test audio upload')
 
-            def configure(store, mail, smtp=smtp_port):
+            def configure(store, mail, smtp=smtp_port, debug=False):
                 values = {'WEBHOOK_TOKEN': 'local-test-token', 'APP_TIMEZONE': 'UTC',
-                          'STORE_TO_FOLDER': str(store).lower(), 'FORWARD_TO_MAIL': str(mail).lower()}
+                          'STORE_TO_FOLDER': str(store).lower(), 'FORWARD_TO_MAIL': str(mail).lower(),
+                          'DEBUG_MODE': str(debug).lower()}
                 if store:
                     values['STORAGE_DIRECTORY'] = 'recordings'
                 if mail:
@@ -96,20 +97,20 @@ with tempfile.TemporaryDirectory(prefix='pebble-http-') as directory:
                                   MAIL_TO='recipient@example.com', MAIL_SUBJECT_PREFIX='Pebble test')
                 (project / '.env').write_text(''.join(f"{key}='{value}'\n" for key, value in values.items()))
 
-            def request(args):
+            def request(args, debug=False):
                 result = subprocess.run(['curl', '-sS', '--max-time', '10', '-w', '\n%{http_code}', url] + args,
                                         capture_output=True, text=True, check=True)
                 body, status = result.stdout.rsplit('\n', 1)
                 status = int(status)
-                if status >= 400:
+                if status >= 400 and not debug:
                     assert body == '', (status, body)
                     return None, status
                 return json.loads(body), status
 
-            def upload():
+            def upload(debug=False):
                 return request(['-H', 'Authorization: Bearer local-test-token', '-F',
                                 'recordedAt=1791536400000', '-F', 'transcription=HTTP test',
-                                '-F', f'audio=@{sample};type=audio/mp4'])
+                                '-F', f'audio=@{sample};type=audio/mp4'], debug=debug)
 
             configure(False, False)
             assert request([])[1] == 405
@@ -163,7 +164,45 @@ with tempfile.TemporaryDirectory(prefix='pebble-http-') as directory:
             assert 'local-test-token' not in private_log and 'wrong-secret' not in private_log
             assert 'Use POST.' in private_log and 'Invalid authorization.' in private_log
             assert (project / 'logs/webhook.log').stat().st_mode & 0o777 == 0o600
-            print('HTTP checks passed: silent errors and private logs; all four setting combinations, attachments, validation, and SMTP failures.')
+            # Debug responses contain useful messages and never append to the private log.
+            before_log = (project / 'logs/webhook.log').read_bytes()
+            configure(False, False, debug=True)
+            for args, status, message in [
+                ([], 405, 'Use POST.'),
+                (['-F', 'recordedAt=1'], 401, 'Invalid authorization.'),
+                (['-H', 'Authorization: Bearer wrong-secret', '-F', 'recordedAt=1'], 401, 'Invalid authorization.'),
+                (['-H', 'Authorization: Bearer local-test-token', '-d', 'recordedAt=1'], 415, 'multipart/form-data'),
+                (['-H', 'Authorization: Bearer local-test-token', '-F', 'recordedAt=invalid'], 400, 'recordedAt'),
+            ]:
+                body, actual = request(args, debug=True)
+                assert actual == status and message in body['error'], (body, actual)
+                assert 'local-test-token' not in json.dumps(body) and 'wrong-secret' not in json.dumps(body)
+            with (project / '.env').open('a') as env:
+                env.write("STORE_TO_FOLDER='typo'\n")
+            body, status = upload(debug=True)
+            assert status == 500 and 'STORE_TO_FOLDER' in body['error']
+            configure(True, False, debug=True)
+            (project / 'blocked-storage').write_text('not a directory')
+            with (project / '.env').open('a') as env:
+                env.write("STORAGE_DIRECTORY='blocked-storage'\n")
+            body, status = upload(debug=True)
+            assert status == 500 and 'permissions' in body['error']
+            for store in [False, True]:
+                configure(store, True, smtp=1, debug=True)
+                body, status = upload(debug=True)
+                assert status == 502 and 'SMTP' in body['error'] and body['saved'] == store
+                if store:
+                    folder = project / 'recordings' / body['folder']
+                    assert (folder / 'audio.m4a').exists()
+                    assert not (folder / 'mail-status.txt').exists()
+            assert (project / 'logs/webhook.log').read_bytes() == before_log
+            configure(False, False, debug=True)
+            body, status = upload(debug=True)
+            assert status == 200 and body['ok']
+            configure(False, False)
+            assert request([])[1] == 405
+            assert (project / 'logs/webhook.log').read_bytes() != before_log
+            print('HTTP checks passed: debug JSON errors without logging; silent errors and private logs; all four setting combinations, attachments, validation, and SMTP failures.')
         finally:
             server.terminate()
             server.wait(timeout=5)

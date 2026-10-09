@@ -111,11 +111,19 @@ the audio attachment (base64 attachment encoding adds about one third to its siz
 
 ## Error logging
 
-All webhook errors return only the HTTP status code with an empty response body.
+With `DEBUG_MODE=false` (the default), webhook errors return only the HTTP status
+code with an empty response body.
 Non-POST requests return 405; missing or incorrect tokens return 401. Successful
 requests still return JSON. Error details are written to `logs/webhook.log`,
 outside the public directory, including validation, configuration, storage, and
 SMTP failures. Tokens and SMTP credentials are excluded from the log.
+
+Set `DEBUG_MODE=true` in `.env` to return meaningful JSON errors instead of
+writing error messages to `logs/webhook.log` or failure messages to
+`mail-status.txt`. Status codes stay the same. Debug responses include validation
+messages and guidance for configuration, storage, and SMTP errors; they exclude
+raw exception messages, stack traces, tokens, and SMTP credentials. Successful
+responses and SMTP acceptance status files behave the same in both modes.
 
 The PHP user needs permission to create and append to `logs/webhook.log`.
 New log directories and files use permissions 0700 and 0600. If the private log

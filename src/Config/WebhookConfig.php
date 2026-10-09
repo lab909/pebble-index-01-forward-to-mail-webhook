@@ -18,7 +18,18 @@ final readonly class WebhookConfig
         public ?string $subjectPrefix,
         public bool $storeToFolder,
         public bool $forwardToMail,
+        public bool $debugMode = false,
     ) {
+    }
+
+    public static function debugModeFromEnvironment(array $environment): bool
+    {
+        $raw = $environment['DEBUG_MODE'] ?? 'false';
+        $value = filter_var($raw, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        if ($value === null || $raw === '') {
+            throw new RuntimeException('Invalid boolean configuration: DEBUG_MODE.');
+        }
+        return $value;
     }
 
     public static function fromEnvironment(string $projectDirectory, array $environment): self
@@ -26,7 +37,7 @@ final readonly class WebhookConfig
         $required = static function (string $name) use ($environment): string {
             $value = $environment[$name] ?? null;
             if (!is_string($value) || $value === '') {
-                throw new RuntimeException('Missing configuration.');
+                throw new RuntimeException('Missing configuration: ' . $name . '.');
             }
             return $value;
         };
@@ -77,6 +88,6 @@ final readonly class WebhookConfig
         }
 
         return new self($webhookToken, $storageDirectory, $timezone, $dsn,
-            $mailFrom, $mailTo, $subjectPrefix, $storeToFolder, $forwardToMail);
+            $mailFrom, $mailTo, $subjectPrefix, $storeToFolder, $forwardToMail, self::debugModeFromEnvironment($environment));
     }
 }

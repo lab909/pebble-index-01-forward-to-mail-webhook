@@ -13,14 +13,14 @@ final readonly class Response
     ) {
     }
 
-    public function send(): void
+    public function send(bool $showErrors = false): void
     {
         http_response_code($this->status);
         foreach ($this->headers as $name => $value) {
             header($name . ': ' . $value);
         }
-        // Error details are logged privately by the endpoint.
-        if ($this->status >= 400) {
+        // Error details are public only when debug mode is explicitly enabled.
+        if ($this->status >= 400 && !$showErrors) {
             return;
         }
         header('Content-Type: application/json; charset=utf-8');

@@ -107,6 +107,8 @@ try {
     $minimal = ['WEBHOOK_TOKEN' => 'test-token', 'APP_TIMEZONE' => 'UTC',
         'STORE_TO_FOLDER' => 'false', 'FORWARD_TO_MAIL' => 'false'];
     $disabled = WebhookConfig::fromEnvironment($directory, $minimal);
+    check(!$disabled->debugMode, 'Debug mode defaults to false');
+    check(WebhookConfig::fromEnvironment($directory, array_replace($minimal, ['DEBUG_MODE' => 'true']))->debugMode, 'Enable debug mode');
     check(!$disabled->storeToFolder && !$disabled->forwardToMail, 'Disable both actions');
     check($disabled->storageDirectory === null && $disabled->smtpDsn === null, 'Disabled actions need no configuration');
     $storageOnly = WebhookConfig::fromEnvironment($directory, array_replace($minimal,
