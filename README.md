@@ -90,7 +90,8 @@ with milliseconds and a random suffix to prevent collisions. It contains:
 - `info.txt`, containing all POST fields and selected request/upload metadata;
 - `mail-status.txt`, recording SMTP acceptance or sending failure when email is enabled.
 
-With `FORWARD_TO_MAIL=true`, the email body contains the received data. `info.txt` and, when supplied,
+With `FORWARD_TO_MAIL=true`, the email body contains only `postFields.transcription`
+(or is empty when transcription is absent). `info.txt` and, when supplied,
 `audio.m4a` are attached. Credentials and the Authorization header are excluded.
 Text-only and audio-only webhook settings also work.
 

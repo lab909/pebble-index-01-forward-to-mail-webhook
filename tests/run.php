@@ -72,6 +72,7 @@ try {
     $email = $mailer->messages[0];
     check($email instanceof Email && count($email->getAttachments()) === 1, 'Attach info.txt');
     check(str_contains($email->toString(), 'info.txt'), 'Serialize email attachments');
+    check($email->getTextBody() === $post['transcription'], 'Email body contains only transcription');
 
     // Email-only delivery attaches upload data without creating storage files.
     $audioPath = $directory . '/upload.m4a';
@@ -85,6 +86,9 @@ try {
     check(str_contains($mailer->messages[1]->toString(), 'audio.m4a'), 'Serialize audio attachment');
     check($emailOnly->folder === null && glob($config->storageDirectory . '/*') === $before, 'Email-only creates no recordings');
     check(count($email->getAttachments()) === 1, 'Keep messages independent across sends');
+
+    $service->send(Recording::fromRequest(new Request($server, ['recordedAt' => $post['recordedAt']], []), $config->timezone));
+    check($mailer->messages[2]->getTextBody() === '', 'Missing transcription leaves an empty email body');
 
     $mailer->fail = true;
     try {
