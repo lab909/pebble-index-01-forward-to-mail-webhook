@@ -12,7 +12,7 @@ import time
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
-def smtp_stub(listener, context, messages):
+def smtp_stub(listener, context, messages, reject_recipient):
     while True:
         try:
             connection, _ = listener.accept()
@@ -27,6 +27,8 @@ def smtp_stub(listener, context, messages):
                     command = line.upper()
                     if command.startswith(b'EHLO'):
                         reply = b'250-localhost\r\n250 SIZE 10000000\r\n'
+                    elif command.startswith(b'RCPT TO:') and reject_recipient.is_set():
+                        reply = b'550 5.7.1 Recipient rejected by diagnostic SMTP stub\r\n'
                     elif command.startswith(b'DATA'):
                         stream.write(b'354 Send message\r\n')
                         stream.flush()
@@ -65,7 +67,8 @@ with tempfile.TemporaryDirectory(prefix='pebble-http-') as directory:
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(certificate, key)
     messages = []
-    thread = threading.Thread(target=smtp_stub, args=(listener, context, messages), daemon=True)
+    reject_recipient = threading.Event()
+    thread = threading.Thread(target=smtp_stub, args=(listener, context, messages, reject_recipient), daemon=True)
     thread.start()
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
@@ -191,10 +194,22 @@ with tempfile.TemporaryDirectory(prefix='pebble-http-') as directory:
                 configure(store, True, smtp=1, debug=True)
                 body, status = upload(debug=True)
                 assert status == 502 and 'SMTP' in body['error'] and body['saved'] == store
+                assert body['smtpDebug']['exceptions'][0]['message']
+                assert 'class' in body['smtpDebug']['exceptions'][0]
                 if store:
                     folder = project / 'recordings' / body['folder']
                     assert (folder / 'audio.m4a').exists()
                     assert not (folder / 'mail-status.txt').exists()
+            configure(False, True, debug=True)
+            reject_recipient.set()
+            body, status = upload(debug=True)
+            assert status == 502
+            diagnostics = body['smtpDebug']['exceptions'][0]
+            assert '550' in diagnostics['message'] and 'Recipient rejected' in diagnostics['message']
+            assert 'RCPT TO:' in diagnostics['smtpTranscript']
+            assert '550 5.7.1' in diagnostics['smtpTranscript']
+            assert 'local-test-token' not in json.dumps(body)
+            reject_recipient.clear()
             assert (project / 'logs/webhook.log').read_bytes() == before_log
             configure(False, False, debug=True)
             body, status = upload(debug=True)

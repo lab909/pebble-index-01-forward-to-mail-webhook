@@ -120,6 +120,27 @@ try {
     } catch (RuntimeException $exception) {
         check(str_contains($exception->getMessage(), 'STORE_TO_FOLDER'), 'Reject invalid boolean');
     }
+    $diagnosticEnvironment = ['SMTP_USERNAME' => 'private-user@example.com',
+        'SMTP_PASSWORD' => 'secret@:#$', 'WEBHOOK_TOKEN' => 'private-webhook-token'];
+    $password = $diagnosticEnvironment['SMTP_PASSWORD'];
+    $plain = base64_encode("\0" . $diagnosticEnvironment['SMTP_USERNAME'] . "\0" . $password);
+    $cause = new RuntimeException('Underlying connection failure');
+    $failure = new Symfony\Component\Mailer\Exception\TransportException(
+        'Authentication failed for ' . $diagnosticEnvironment['SMTP_USERNAME'] . ' using ' . $password
+        . ' ' . rawurlencode($password) . ' ' . $plain . ' private-webhook-token', 535, $cause);
+    $failure->appendDebug("[timestamp] > EHLO local\n[timestamp] > AUTH PLAIN " . $plain
+        . "\n[timestamp] > AUTH LOGIN\n[timestamp] > " . base64_encode($password)
+        . "\n[timestamp] > unknown-cram-response\n[timestamp] < 535 Authentication failed\n");
+    $details = (new Pebble\Services\SmtpDiagnostics($diagnosticEnvironment))->describe($failure);
+    $serialized = json_encode($details, JSON_THROW_ON_ERROR);
+    foreach ([$password, rawurlencode($password), base64_encode($password), $plain,
+        $diagnosticEnvironment['SMTP_USERNAME'], 'private-webhook-token', 'unknown-cram-response'] as $secret) {
+        check(!str_contains($serialized, $secret), 'Redact SMTP diagnostic secrets');
+    }
+    check(count($details['exceptions']) === 2, 'Include nested SMTP causes');
+    check($details['exceptions'][0]['code'] === 535, 'Include SMTP error code');
+    check(str_contains($details['exceptions'][0]['smtpTranscript'], '535 Authentication failed'), 'Keep SMTP reply');
+    check(str_contains($details['exceptions'][0]['smtpTranscript'], 'AUTH PLAIN [redacted]'), 'Keep AUTH mechanism without credentials');
     echo "All regression checks passed.\n";
 } finally {
     $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($directory,

@@ -122,7 +122,10 @@ Set `DEBUG_MODE=true` in `.env` to return meaningful JSON errors instead of
 writing error messages to `logs/webhook.log` or failure messages to
 `mail-status.txt`. Status codes stay the same. Debug responses include validation
 messages and guidance for configuration, storage, and SMTP errors; they exclude
-raw exception messages, stack traces, tokens, and SMTP credentials. Successful
+stack traces, tokens, and SMTP credentials. SMTP failures also include
+`smtpDebug.exceptions` with the full exception messages, types, codes, nested
+causes, and available SMTP transcripts. Authentication payloads and configured
+credentials are redacted. Connection failures may have an empty transcript. Successful
 responses and SMTP acceptance status files behave the same in both modes.
 
 The PHP user needs permission to create and append to `logs/webhook.log`.

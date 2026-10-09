@@ -9,6 +9,7 @@ use Pebble\Http\ErrorResponder;
 use Pebble\Services\RecordingMailer;
 use Pebble\Services\RecordingStorage;
 use Pebble\Services\RequestValidator;
+use Pebble\Services\SmtpDiagnostics;
 use Symfony\Component\Dotenv\Dotenv;
 use Symfony\Component\Mailer\Mailer;
 use Symfony\Component\Mailer\Transport;
@@ -100,6 +101,9 @@ if ($mailer !== null) {
         }
         unset($result['ok']);
         $result['error'] = $storage !== null ? 'Saved locally, but SMTP sending failed.' : 'SMTP sending failed.';
+        if ($config->debugMode) {
+            $result['smtpDebug'] = (new SmtpDiagnostics($environment))->describe($exception);
+        }
         $errorResponder->send(new Response(502, $result));
         exit;
     }
