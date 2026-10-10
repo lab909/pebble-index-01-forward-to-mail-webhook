@@ -1,6 +1,6 @@
 {
     "name": "local/pebble-webhook",
-    "description": "Store Pebble recordings and email them via SMTP",
+    "description": "Pebble Index 01 Webhook Hub with optional storage, email, and Todoist destinations",
     "type": "project",
     "require": {
         "php": ">=8.2",

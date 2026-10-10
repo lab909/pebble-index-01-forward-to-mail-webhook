@@ -84,7 +84,8 @@ class TodoistStub:
                     stub.tasks.append(task)
                     return self.reply(200, task)
                 if self.path == '/api/v1/comments':
-                    if stub.fail == 'comments':
+                    if stub.fail == 'comments' or (stub.fail == 'info-comment'
+                                                   and data['attachment']['file_name'] == 'info.txt'):
                         return self.reply(403, {'error': f'Comment denied for {TOKEN}'})
                     assert 'attachment' in data and 'file_attachment' not in data, data
                     comment = dict(data, id=f'comment-{len(stub.comments)}')

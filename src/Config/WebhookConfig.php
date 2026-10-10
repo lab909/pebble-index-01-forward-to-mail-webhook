@@ -4,106 +4,61 @@ declare(strict_types=1);
 namespace Pebble\Config;
 
 use DateTimeZone;
-use RuntimeException;
 
+/** Aggregate configuration; legacy properties remain during the phased migration. */
 final readonly class WebhookConfig
 {
+    public string $webhookToken;
+    public DateTimeZone $timezone;
+    public bool $debugMode;
+    public bool $storeToFolder;
+    public ?string $storageDirectory;
+    public bool $forwardToMail;
+    public ?string $smtpDsn;
+    public ?string $mailFrom;
+    public ?string $mailTo;
+    public ?string $subjectPrefix;
+    public bool $saveToTodoist;
+    public ?string $todoistApiToken;
+    public ?string $todoistParentProject;
+
     public function __construct(
-        public string $webhookToken,
-        public ?string $storageDirectory,
-        public DateTimeZone $timezone,
-        public ?string $smtpDsn,
-        public ?string $mailFrom,
-        public ?string $mailTo,
-        public ?string $subjectPrefix,
-        public bool $storeToFolder,
-        public bool $forwardToMail,
-        public bool $debugMode = false,
-        public bool $saveToTodoist = false,
-        public ?string $todoistApiToken = null,
-        public ?string $todoistParentProject = null,
+        public CoreConfig $core,
+        public LoggingConfig $logging,
+        public ?StorageConfig $storage,
+        public ?NoteEmailConfig $email,
+        public ?TodoistConfig $todoist,
     ) {
+        $this->webhookToken = $core->webhookToken;
+        $this->timezone = $core->timezone;
+        $this->debugMode = $core->debugMode;
+        $this->storeToFolder = $storage !== null;
+        $this->storageDirectory = $storage?->directory;
+        $this->forwardToMail = $email !== null;
+        $this->smtpDsn = $email?->smtp->dsn;
+        $this->mailFrom = $email?->from;
+        $this->mailTo = $email?->to;
+        $this->subjectPrefix = $email?->subjectPrefix;
+        $this->saveToTodoist = $todoist !== null;
+        $this->todoistApiToken = $todoist?->apiToken;
+        $this->todoistParentProject = $todoist?->parentProjectId;
     }
 
-    public static function debugModeFromEnvironment(array $environment): bool
+    public static function debugModeFromEnvironment(array $values): bool
     {
-        $raw = $environment['DEBUG_MODE'] ?? 'false';
-        $value = filter_var($raw, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
-        if ($value === null || $raw === '') {
-            throw new RuntimeException('Invalid boolean configuration: DEBUG_MODE.');
-        }
-        return $value;
+        return (new Environment('', $values))->boolean('DEBUG_MODE', false);
     }
 
-    public static function fromEnvironment(string $projectDirectory, array $environment): self
+    public static function fromEnvironment(string $projectDirectory, #[\SensitiveParameter] array $values): self
     {
-        $required = static function (string $name) use ($environment): string {
-            $value = $environment[$name] ?? null;
-            if (!is_string($value) || $value === '') {
-                throw new RuntimeException('Missing configuration: ' . $name . '.');
-            }
-            return $value;
-        };
-        $webhookToken = $required('WEBHOOK_TOKEN');
-        if ($webhookToken === 'CHANGE-ME-TO-A-LONG-RANDOM-TOKEN') {
-            throw new RuntimeException('Configure the webhook token.');
-        }
-        $boolean = static function (string $name, bool $default = true) use ($environment): bool {
-            $value = filter_var($environment[$name] ?? ($default ? 'true' : 'false'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
-            if ($value === null || ($environment[$name] ?? ($default ? 'true' : 'false')) === '') {
-                throw new RuntimeException('Invalid boolean configuration: ' . $name);
-            }
-            return $value;
-        };
-        $storeToFolder = $boolean('STORE_TO_FOLDER');
-        $forwardToMail = $boolean('FORWARD_TO_MAIL');
-        $saveToTodoist = $boolean('SAVE_TO_TODOIST', false);
-        $todoistApiToken = $todoistParentProject = null;
-        if ($saveToTodoist) {
-            $todoistApiToken = $required('TODOIST_API_TOKEN');
-            $todoistParentProject = $required('TODOIST_PARENT_PROJECT');
-            if (strpbrk($todoistApiToken, "\r\n") !== false) {
-                throw new RuntimeException('Invalid TODOIST_API_TOKEN.');
-            }
-            if (!extension_loaded('curl')) {
-                throw new RuntimeException('Todoist requires the PHP cURL extension.');
-            }
-        }
-        $timezone = new DateTimeZone($required('APP_TIMEZONE'));
-        $storageDirectory = null;
-        if ($storeToFolder) {
-            $storageDirectory = $required('STORAGE_DIRECTORY');
-            // Relative storage paths are resolved against the project directory.
-            $normalizedPath = str_replace(chr(92), '/', $storageDirectory);
-            if ($normalizedPath[0] !== '/' && !preg_match('~^[A-Za-z]:/~', $normalizedPath)) {
-                $storageDirectory = $projectDirectory . '/' . $storageDirectory;
-            }
-        }
-        $dsn = $mailFrom = $mailTo = $subjectPrefix = null;
-        if ($forwardToMail) {
-            $scheme = $required('SMTP_SCHEME');
-            $host = $required('SMTP_HOST');
-            $port = filter_var($required('SMTP_PORT'), FILTER_VALIDATE_INT,
-                ['options' => ['min_range' => 1, 'max_range' => 65535]]);
-            if (!in_array($scheme, ['smtp', 'smtps'], true)
-                || !preg_match('/^[a-zA-Z0-9.-]+$/D', $host) || $port === false) {
-                throw new RuntimeException('Invalid SMTP configuration.');
-            }
-            // Encode credentials automatically, including passwords containing @, #, or :.
-            $dsn = sprintf('%s://%s:%s@%s:%d', $scheme,
-                rawurlencode($required('SMTP_USERNAME')),
-                rawurlencode($required('SMTP_PASSWORD')), $host, $port);
-            // SMTP uses required STARTTLS; SMTPS uses TLS from connection establishment.
-            if ($scheme === 'smtp') {
-                $dsn .= '?require_tls=true';
-            }
-            $mailFrom = $required('MAIL_FROM');
-            $mailTo = $required('MAIL_TO');
-            $subjectPrefix = $required('MAIL_SUBJECT_PREFIX');
-        }
-
-        return new self($webhookToken, $storageDirectory, $timezone, $dsn,
-            $mailFrom, $mailTo, $subjectPrefix, $storeToFolder, $forwardToMail, self::debugModeFromEnvironment($environment),
-            $saveToTodoist, $todoistApiToken, $todoistParentProject);
+        $environment = new Environment($projectDirectory, $values);
+        $store = $environment->boolean('STORE_TO_FOLDER', true);
+        $mail = $environment->boolean('FORWARD_TO_MAIL', true);
+        $todoist = $environment->boolean('SAVE_TO_TODOIST', false);
+        $core = CoreConfig::fromEnvironment($environment);
+        return new self($core, LoggingConfig::fromEnvironment($environment),
+            $store ? StorageConfig::fromEnvironment($environment) : null,
+            $mail ? NoteEmailConfig::fromEnvironment($environment) : null,
+            $todoist ? TodoistConfig::fromEnvironment($environment) : null);
     }
 }

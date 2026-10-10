@@ -2,6 +2,7 @@
 import json
 import os
 import pathlib
+import re
 import socket
 import ssl
 import subprocess
@@ -12,6 +13,46 @@ from datetime import datetime, timezone
 from todoist_stub import TodoistStub, TOKEN as TODOIST_TOKEN
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+# Public compatibility expectations: (storage, email, Todoist, response flags).
+FEATURE_COMBINATIONS = [
+    (False, False, False, {'saved': False, 'emailSent': False, 'todoistSaved': False}),
+    (False, True, False, {'saved': False, 'emailSent': True, 'todoistSaved': False}),
+    (True, False, False, {'saved': True, 'emailSent': False, 'todoistSaved': False}),
+    (True, True, False, {'saved': True, 'emailSent': True, 'todoistSaved': False}),
+    (False, False, True, {'saved': False, 'emailSent': False, 'todoistSaved': True}),
+    (False, True, True, {'saved': False, 'emailSent': True, 'todoistSaved': True}),
+    (True, False, True, {'saved': True, 'emailSent': False, 'todoistSaved': True}),
+    (True, True, True, {'saved': True, 'emailSent': True, 'todoistSaved': True}),
+]
+
+
+def assert_success(body, flags):
+    expected_keys = {'ok', 'saved', 'emailSent', 'todoistSaved'}
+    if flags['saved']:
+        expected_keys.add('folder')
+        assert re.fullmatch(r'\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{3}_[0-9a-f]{6}', body['folder']), body
+    if flags['todoistSaved']:
+        expected_keys.update(['todoistProjectId', 'todoistTaskId'])
+    assert set(body) == expected_keys, body
+    assert body['ok'] is True and all(body[name] is value for name, value in flags.items()), body
+
+
+def assert_info(info, audio_size):
+    assert set(info) == {'receivedAt', 'recordedAt', 'timezone', 'postFields', 'audio', 'headers'}
+    assert info['timezone'] == 'UTC'
+    assert re.fullmatch(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\+00:00', info['receivedAt'])
+    assert datetime.fromisoformat(info['receivedAt']).utcoffset().total_seconds() == 0
+    assert info['recordedAt'] == datetime.fromtimestamp(1791536400, timezone.utc).isoformat()
+    assert info['postFields'] == {'recordedAt': '1791536400000', 'transcription': 'HTTP test',
+                                  'client': 'ring', 'extra': {'nested': 'preserved'}}
+    assert info['audio'] == {'savedAs': 'audio.m4a', 'originalFilename': 'sample.m4a',
+                             'reportedContentType': 'audio/mp4', 'sizeBytes': audio_size}
+    assert set(info['headers']) == {'Content-Type', 'X-Audio-Size', 'User-Agent'}
+    assert info['headers']['Content-Type'].startswith('multipart/form-data; boundary=')
+    assert info['headers']['X-Audio-Size'] == str(audio_size)
+    assert info['headers']['User-Agent'] == 'Pebble baseline test'
+
 
 
 def smtp_stub(listener, context, messages, reject_recipient):
@@ -56,10 +97,12 @@ with tempfile.TemporaryDirectory(prefix='pebble-http-') as directory:
     (project / 'public').mkdir()
     todoist = TodoistStub()
     threading.Thread(target=todoist.server.serve_forever, daemon=True).start()
-    # Override the client constructor only in the isolated test endpoint.
+    # Inject the local API client through Bootstrap; production has no endpoint override.
     endpoint = (ROOT / 'public/webhook.php').read_text().replace(
-        'new TodoistClient($config->todoistApiToken)',
-        f'new TodoistClient($config->todoistApiToken, "{todoist.url}")')
+        '$bootstrap = new Bootstrap($projectDirectory);',
+        '$bootstrap = new Bootstrap($projectDirectory, '
+        'static fn (\\Pebble\\Config\\TodoistConfig $config): \\Pebble\\Services\\TodoistClient '
+        f'=> new \\Pebble\\Services\\TodoistClient($config->apiToken, "{todoist.url}"));')
     (project / 'public/webhook.php').write_text(endpoint)
     (project / 'src').symlink_to(ROOT / 'src', target_is_directory=True)
     (project / 'vendor').symlink_to(ROOT / 'vendor', target_is_directory=True)
@@ -111,10 +154,16 @@ with tempfile.TemporaryDirectory(prefix='pebble-http-') as directory:
                 (project / '.env').write_text(''.join(f"{key}='{value}'\n" for key, value in values.items()))
 
             def request(args, debug=False):
-                result = subprocess.run(['curl', '-sS', '--max-time', '10', '-w', '\n%{http_code}', url] + args,
+                header_file = project / 'response-headers.txt'
+                result = subprocess.run(['curl', '-sS', '--max-time', '10', '--dump-header', str(header_file), '-w', '\n%{http_code}', url] + args,
                                         capture_output=True, text=True, check=True)
                 body, status = result.stdout.rsplit('\n', 1)
                 status = int(status)
+                headers = header_file.read_text().lower()
+                if status == 405:
+                    assert 'allow: post' in headers
+                if status < 400 or debug:
+                    assert 'content-type: application/json; charset=utf-8' in headers
                 if status >= 400 and not debug:
                     assert body == '', (status, body)
                     return None, status
@@ -123,6 +172,10 @@ with tempfile.TemporaryDirectory(prefix='pebble-http-') as directory:
             def upload(debug=False):
                 return request(['-H', 'Authorization: Bearer local-test-token', '-F',
                                 'recordedAt=1791536400000', '-F', 'transcription=HTTP test',
+                                '-F', 'client=ring', '-F', 'extra[nested]=preserved',
+                                '-H', f'X-Audio-Size: {sample.stat().st_size}',
+                                '-H', 'User-Agent: Pebble baseline test',
+                                '-H', 'X-Private-Test: must-not-be-saved',
                                 '-F', f'audio=@{sample};type=audio/mp4'], debug=debug)
 
             configure(False, False)
@@ -133,24 +186,39 @@ with tempfile.TemporaryDirectory(prefix='pebble-http-') as directory:
             assert request(['-H', 'Authorization: Bearer local-test-token', '-F', 'recordedAt=invalid'])[1] == 400
             assert not (project / 'recordings').exists()
 
-            for store, mail in [(False, False), (False, True), (True, False), (True, True)]:
+            for store, mail, enabled, flags in FEATURE_COMBINATIONS[:4]:
                 configure(store, mail)
                 before = len(messages)
                 body, status = upload()
                 assert status == 200, (body, status, (project / 'server.log').read_text())
-                assert body['saved'] == store and body['emailSent'] == mail, body
+                assert_success(body, flags)
                 assert len(messages) == before + int(mail)
                 if store:
                     folder = project / 'recordings' / body['folder']
                     assert (folder / 'audio.m4a').read_bytes() == sample.read_bytes()
                     info = json.loads((folder / 'info.txt').read_text())
-                    assert info['postFields']['transcription'] == 'HTTP test'
+                    assert_info(info, sample.stat().st_size)
                     assert 'local-test-token' not in (folder / 'info.txt').read_text()
                     assert (folder / 'mail-status.txt').exists() == mail
                 else:
                     assert 'folder' not in body and not (project / 'recordings').exists()
                 if mail:
                     assert b'filename=info.txt' in messages[-1] and b'filename=audio.m4a' in messages[-1]
+
+            # An invalid disabled destination must not be constructed or contacted.
+            configure(False, False)
+            with (project / '.env').open('a') as env:
+                env.write("STORAGE_DIRECTORY='/invalid-storage'\nSMTP_SCHEME='invalid'\nSMTP_PORT='not-a-port'\n"
+                          "SMTP_HOST='invalid host'\nSMTP_USERNAME=''\nSMTP_PASSWORD=''\n"
+                          "MAIL_FROM='invalid address'\nMAIL_TO='invalid address'\n"
+                          "TODOIST_API_TOKEN=''\nTODOIST_PARENT_PROJECT=''\n")
+            before_messages, before_api = len(messages), len(todoist.requests)
+            recordings_before = list((project / 'recordings').iterdir())
+            body, status = upload()
+            assert status == 200
+            assert_success(body, FEATURE_COMBINATIONS[0][3])
+            assert len(messages) == before_messages and len(todoist.requests) == before_api
+            assert list((project / 'recordings').iterdir()) == recordings_before
 
             for store in [False, True]:
                 configure(store, True, smtp=1)
@@ -246,7 +314,7 @@ with tempfile.TemporaryDirectory(prefix='pebble-http-') as directory:
             assert todoist.uploads[-2]['data'] == sample.read_bytes()
             assert todoist.uploads[-2]['file_type'] == 'audio/mp4'
             info = json.loads(todoist.uploads[-1]['data'])
-            assert info['postFields']['transcription'] == 'HTTP test'
+            assert_info(info, sample.stat().st_size)
             assert 'local-test-token' not in todoist.uploads[-1]['data'].decode()
             assert all(comment['task_id'] == task['id'] for comment in todoist.comments[-2:])
             assert 'folder' not in body and list((project / 'recordings').iterdir()) == recordings_before
@@ -275,16 +343,39 @@ echo json_encode($service->save($recording));
             assert todoist.projects[-1]['name'] == 'March 2026'
 
             # Every storage/mail combination works with Todoist enabled.
-            for store, mail in [(False, False), (False, True), (True, False), (True, True)]:
-                configure(store, mail, debug=True, save_todoist=True)
+            for store, mail, enabled, flags in FEATURE_COMBINATIONS[4:]:
+                configure(store, mail, debug=True, save_todoist=enabled)
                 recordings_before = list((project / 'recordings').iterdir())
                 body, status = upload(debug=True)
-                assert status == 200 and body['todoistSaved'] and body['saved'] == store and body['emailSent'] == mail
+                assert status == 200
+                assert_success(body, flags)
                 if store:
                     folder = project / 'recordings' / body['folder']
                     assert (folder / 'audio.m4a').read_bytes() == todoist.uploads[-2]['data']
                 else:
                     assert list((project / 'recordings').iterdir()) == recordings_before
+
+            # Validation and local storage failure must prevent all forwarding.
+            configure(True, True, debug=True, save_todoist=True)
+            before_messages, before_api = len(messages), len(todoist.requests)
+            recordings_before = list((project / 'recordings').iterdir())
+            for args, expected in [
+                ([], 405),
+                (['-F', 'recordedAt=1'], 401),
+                (['-H', 'Authorization: Bearer local-test-token', '-F', 'recordedAt=invalid'], 400),
+                (['-H', 'Authorization: Bearer local-test-token', '-F', 'recordedAt=1'], 400),
+            ]:
+                assert request(args, debug=True)[1] == expected
+            for debug in [False, True]:
+                configure(True, True, debug=debug, save_todoist=True)
+                with (project / '.env').open('a') as env:
+                    env.write("STORAGE_DIRECTORY='blocked-storage'\n")
+                body, status = upload(debug=debug)
+                assert status == 500
+                if debug:
+                    assert set(body) == {'error'} and 'permissions' in body['error']
+            assert len(messages) == before_messages and len(todoist.requests) == before_api
+            assert list((project / 'recordings').iterdir()) == recordings_before
 
             # A failing email does not prevent Todoist delivery.
             configure(False, True, smtp=1, debug=True, save_todoist=True)
@@ -300,13 +391,21 @@ echo json_encode($service->save($recording));
 
             # Partial failures expose the created task and stage in debug mode, without the token.
             for failed_stage, expected_stage in [('audio.m4a', 'audio upload'), ('info.txt', 'info.txt upload'),
-                                                 ('comments', 'audio comment creation')]:
+                                                 ('comments', 'audio comment creation'), ('info-comment', 'info.txt comment creation')]:
                 configure(True, False, debug=True, save_todoist=True)
                 todoist.fail = failed_stage
                 before_log = (project / 'logs/webhook.log').read_bytes()
+                tasks_before, comments_before = len(todoist.tasks), len(todoist.comments)
                 body, status = upload(debug=True)
                 assert status == 502 and body['saved'] and not body['todoistSaved']
+                assert 'ok' not in body
+                assert len(todoist.tasks) == tasks_before + 1
                 assert body['todoistTaskId'] == todoist.tasks[-1]['id']
+                assert body['todoistProjectId'] == monthly['id']
+                completed = 1 if failed_stage in ['info.txt', 'info-comment'] else 0
+                assert body['todoistDebug']['commentsCreated'] == completed
+                assert len(todoist.comments) == comments_before + completed
+                assert all(comment['task_id'] == body['todoistTaskId'] for comment in todoist.comments[comments_before:])
                 assert body['todoistDebug']['stage'] == expected_stage, body
                 assert TODOIST_TOKEN not in json.dumps(body) and '[redacted]' in body['todoistDebug']['message']
                 assert (project / 'logs/webhook.log').read_bytes() == before_log
@@ -324,10 +423,14 @@ echo json_encode($service->save($recording));
 
             # Production mode logs sanitized failures and sends an empty response.
             configure(False, False, save_todoist=True)
+            todoist.fail = 'info.txt'
+            tasks_before = len(todoist.tasks)
             body, status = upload()
             assert status == 502 and body is None
+            assert len(todoist.tasks) == tasks_before + 1
             private_log = (project / 'logs/webhook.log').read_text()
             assert 'Todoist' in private_log and TODOIST_TOKEN not in private_log
+            assert todoist.tasks[-1]['id'] in private_log and 'info.txt upload' in private_log
             todoist.fail = None
 
             # Disabled mode doesn't require Todoist credentials; enabled mode does.
@@ -340,7 +443,7 @@ echo json_encode($service->save($recording));
             with (project / '.env').open('a') as env:
                 env.write("SAVE_TO_TODOIST='typo'\n")
             assert upload(debug=True)[1] == 500
-            print('HTTP checks passed: debug JSON errors without logging; silent errors and private logs; all four setting combinations, attachments, validation, and SMTP failures; Todoist project reuse, tasks, uploads, and partial failures.')
+            print('HTTP checks passed: debug JSON errors without logging; silent errors and private logs; all eight destination combinations, disabled credentials, storage abort policy, metadata, attachments, validation, and SMTP failures; Todoist project reuse, tasks, uploads, and partial failures.')
         finally:
             server.terminate()
             server.wait(timeout=5)

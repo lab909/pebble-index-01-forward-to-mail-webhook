@@ -45,6 +45,8 @@ try {
         'SMTP_PASSWORD' => 'p@ss:#$', 'MAIL_FROM' => 'sender@example.com',
         'MAIL_TO' => 'recipient@example.com', 'MAIL_SUBJECT_PREFIX' => 'Pebble',
     ]);
+    check($config->storeToFolder && $config->forwardToMail && !$config->saveToTodoist && !$config->debugMode,
+        'Defaults enable storage/email and disable Todoist/debug');
     check($config->storageDirectory === $directory . '/recordings', 'Resolve relative storage path');
     check(str_contains($config->smtpDsn, 'p%40ss%3A%23%24'), 'Encode SMTP credentials');
     check(str_ends_with($config->smtpDsn, '?require_tls=true'), 'Require STARTTLS');
@@ -59,6 +61,21 @@ try {
     check($validator->validate(new Request($server, $post, ['audio' => ['error' => UPLOAD_ERR_PARTIAL]]))?->body['uploadError'] === UPLOAD_ERR_PARTIAL, 'Report upload error');
     check($validator->validate(new Request($server, $post, ['audio' => ['error' => UPLOAD_ERR_OK, 'tmp_name' => []]]))?->status === 400, 'Reject malformed upload');
 
+    check($validator->validate(new Request([
+        'REDIRECT_HTTP_AUTHORIZATION' => 'Bearer test-token', 'CONTENT_TYPE' => 'multipart/form-data',
+    ], $post, [])) === null, 'Accept forwarded authorization');
+    foreach (['', '-1', '1.5', '12345678901234', ['nested']] as $invalidTimestamp) {
+        check($validator->validate(new Request($server, ['recordedAt' => $invalidTimestamp], []))?->status === 400,
+            'Reject invalid timestamp forms');
+    }
+    check($validator->validate(new Request($server, ['recordedAt' => '0'], [])) === null,
+        'Allow text-only requests without transcription when Todoist is disabled');
+    check($validator->validate(new Request($server, $post, ['audio' => 'invalid']))?->status === 400,
+        'Reject malformed audio structure');
+    check($validator->validate(new Request($server, $post, ['audio' => [
+        'error' => UPLOAD_ERR_OK, 'tmp_name' => __FILE__,
+    ]]))?->status === 400, 'Reject files not uploaded through PHP HTTP handling');
+
     $storage = new RecordingStorage($config->storageDirectory, $config->timezone);
     $service = new RecordingMailer($mailer, $config->mailFrom, $config->mailTo, $config->subjectPrefix);
     $recording = $storage->save(Recording::fromRequest(new Request($server, $post, []), $config->timezone));
@@ -66,6 +83,13 @@ try {
     $storage->recordMailStatus($recording, true);
     $folder = $recording->folder;
     $info = json_decode(file_get_contents($folder . '/info.txt'), true, flags: JSON_THROW_ON_ERROR);
+    check(array_keys($info) === ['receivedAt', 'recordedAt', 'timezone', 'postFields', 'audio', 'headers'],
+        'Preserve info.txt top-level schema');
+    check($info['audio'] === null && $info['timezone'] === 'UTC', 'Text-only metadata has no audio');
+    check(array_keys($info['headers']) === ['Content-Type', 'X-Audio-Size', 'User-Agent'],
+        'Preserve metadata header whitelist');
+    check($info['recordedAt'] === (new DateTimeImmutable('@1791536400'))->format(DateTimeInterface::ATOM),
+        'Convert milliseconds to timezone-adjusted recording date');
     check($info['postFields'] === $post, 'Preserve all POST fields');
     check(!str_contains(file_get_contents($folder . '/info.txt'), 'test-token'), 'Exclude authorization');
     check(file_get_contents($folder . '/mail-status.txt') === "Accepted by SMTP server.\n", 'Record SMTP success');
@@ -111,6 +135,14 @@ try {
     $minimal = ['WEBHOOK_TOKEN' => 'test-token', 'APP_TIMEZONE' => 'UTC',
         'STORE_TO_FOLDER' => 'false', 'FORWARD_TO_MAIL' => 'false'];
     $disabled = WebhookConfig::fromEnvironment($directory, $minimal);
+    $ignored = WebhookConfig::fromEnvironment($directory, array_replace($minimal, [
+        'STORAGE_DIRECTORY' => '', 'SMTP_SCHEME' => 'invalid', 'SMTP_HOST' => 'invalid host',
+        'SMTP_PORT' => 'invalid', 'SMTP_USERNAME' => '', 'SMTP_PASSWORD' => '',
+        'MAIL_FROM' => 'invalid address', 'MAIL_TO' => 'invalid address',
+        'TODOIST_API_TOKEN' => '', 'TODOIST_PARENT_PROJECT' => '',
+    ]));
+    check($ignored->smtpDsn === null && $ignored->storageDirectory === null && $ignored->todoistApiToken === null,
+        'Ignore invalid settings for disabled destinations');
     check(!$disabled->saveToTodoist && $disabled->todoistApiToken === null, 'Todoist is disabled by default');
     $todoistConfig = WebhookConfig::fromEnvironment($directory, array_replace($minimal, [
         'SAVE_TO_TODOIST' => 'true', 'TODOIST_API_TOKEN' => 'todoist-secret', 'TODOIST_PARENT_PROJECT' => 'parent-id',

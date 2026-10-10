@@ -24,6 +24,15 @@ attempted independently, so a failure in one does not prevent the other from
 running. Request validation, configuration, and local storage failures stop
 processing before forwarding. The hub currently has no queue or automatic retry.
 
+## Development roadmap
+
+See the [implementation plan](docs/IMPLEMENTATION_PLAN.md) for the planned
+operation pipeline, package-based extensions, Monolog log rotation, and failure
+notification emails. Its checkboxes track future implementation; these roadmap
+features are not yet available in the running hub. Phases 1 and 2 are complete; the
+[compatibility baseline](docs/COMPATIBILITY_BASELINE.md) records current behavior
+and the regression checks that later refactoring must preserve.
+
 ## Requirements
 
 Requires PHP 8.2+, Composer, and PHP OpenSSL support. Todoist also requires
@@ -66,7 +75,8 @@ The web server's PHP user needs write access to the project directory to create
 autoloaded by Composer under the `Pebble\` namespace:
 
 - `public/webhook.php`: loads configuration and coordinates validation, storage, email, and Todoist.
-- `src/Config/WebhookConfig.php`: validates environment settings.
+- `src/Bootstrap.php`: loads the environment once and constructs enabled services without executing them.
+- `src/Config/`: separate core, storage, email, Todoist, and logging settings with shared validation; `WebhookConfig` aggregates them. `AlertConfig` prepares failure notification settings for Phase 8.
 - `src/Services/FileLogger.php`: writes private error logs.
 - `src/Services/RequestValidator.php`: checks authentication and multipart payloads.
 - `src/Services/RecordingStorage.php`: saves recordings, cleans incomplete writes, and records mail status.
@@ -204,7 +214,14 @@ causes, and available SMTP transcripts. Authentication payloads and configured
 credentials are redacted. Connection failures may have an empty transcript. Successful
 responses and SMTP acceptance status files behave the same in both modes.
 
-The PHP user needs permission to create and append to `logs/webhook.log`.
+Set `LOG_DIRECTORY` and `LOG_FILENAME` to change the private log location; the
+defaults are `logs` and `webhook.log`. Relative directories resolve from the project
+root. Log, storage, and future alert state paths inside `public/` are rejected,
+including paths reached through existing symlinks. Before a valid log path is
+available (for example, missing dependencies or a malformed `.env`), errors use
+the server's PHP error log. Debug mode suppresses these log writes as well.
+
+The PHP user needs permission to create and append to the configured log file.
 New log directories and files use permissions 0700 and 0600. If the private log
 cannot be written, messages fall back to the server's PHP error log.
 
@@ -215,7 +232,9 @@ First check the syntax:
 ```bash
 find src public tests -name '*.php' -exec php -l {} \;
 php tests/run.php
+php tests/config.php
 python3 tests/http.py
+python3 tests/bootstrap_http.py
 ```
 
 Then use Pebble or a multipart request such as this (use your actual token,

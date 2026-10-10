@@ -1,21 +1,19 @@
 <?php
 declare(strict_types=1);
 
+use Pebble\Bootstrap;
 use Pebble\Config\WebhookConfig;
+use Pebble\Config\ConfigurationException;
+use Pebble\Config\CoreConfig;
+use Pebble\Config\Environment;
+use Pebble\Config\LoggingConfig;
 use Pebble\Http\Request;
 use Pebble\Http\Response;
 use Pebble\Recording\Recording;
 use Pebble\Http\ErrorResponder;
-use Pebble\Services\RecordingMailer;
-use Pebble\Services\RecordingStorage;
 use Pebble\Services\RequestValidator;
 use Pebble\Services\SmtpDiagnostics;
-use Pebble\Services\TodoistClient;
-use Pebble\Services\TodoistService;
 use Pebble\Exception\TodoistException;
-use Symfony\Component\Dotenv\Dotenv;
-use Symfony\Component\Mailer\Mailer;
-use Symfony\Component\Mailer\Transport;
 
 $projectDirectory = dirname(__DIR__);
 // Load error handling directly so missing Composer dependencies are handled too.
@@ -24,6 +22,9 @@ require_once $projectDirectory . '/src/Http/Response.php';
 require_once $projectDirectory . '/src/Http/ErrorResponder.php';
 $errorResponder = new ErrorResponder($projectDirectory . '/logs/webhook.log',
     filter_var($_ENV['DEBUG_MODE'] ?? $_SERVER['DEBUG_MODE'] ?? getenv('DEBUG_MODE'), FILTER_VALIDATE_BOOLEAN));
+
+// Before a private log path can be validated, use the server's error log.
+$errorResponder->usePhpErrorLog();
 
 try {
     require $projectDirectory . '/vendor/autoload.php';
@@ -34,19 +35,27 @@ try {
 
 $request = Request::fromGlobals();
 $configurationError = null;
+$bootstrap = new Bootstrap($projectDirectory);
 try {
-    (new Dotenv())->load($projectDirectory . '/.env');
-    $environment = array_replace($_SERVER, $_ENV);
+    $environment = $bootstrap->loadEnvironment();
     $errorResponder->setDebugMode(WebhookConfig::debugModeFromEnvironment($environment));
+    try {
+        $logging = LoggingConfig::fromEnvironment(new Environment($projectDirectory, $environment));
+        $errorResponder->setLogPath($logging->path());
+    } catch (ConfigurationException $exception) {
+        $errorResponder->usePhpErrorLog();
+        $configurationError = $exception->getMessage();
+        throw $exception;
+    }
     if (($request->server['REQUEST_METHOD'] ?? '') !== 'POST') {
         $errorResponder->send(new Response(405, ['error' => 'Use POST.'], ['Allow' => 'POST']));
         exit;
     }
-    $webhookToken = $environment['WEBHOOK_TOKEN'] ?? null;
-    if (!is_string($webhookToken) || $webhookToken === ''
-        || $webhookToken === 'CHANGE-ME-TO-A-LONG-RANDOM-TOKEN') {
+    try {
+        $webhookToken = CoreConfig::token(new Environment($projectDirectory, $environment));
+    } catch (ConfigurationException) {
         $configurationError = 'Configure WEBHOOK_TOKEN in .env with a non-placeholder token.';
-        throw new RuntimeException($configurationError);
+        throw new ConfigurationException($configurationError);
     }
     // Reject invalid requests before checking optional storage and SMTP settings.
     $error = (new RequestValidator($webhookToken))->validate($request);
@@ -61,16 +70,11 @@ try {
         $configurationError = $exception->getMessage();
         throw $exception;
     }
-    $storage = $config->storeToFolder ? new RecordingStorage($config->storageDirectory, $config->timezone) : null;
-    $todoist = $config->saveToTodoist ? new TodoistService(
-        new TodoistClient($config->todoistApiToken), $config->todoistParentProject, $config->timezone,
-    ) : null;
-    $mailer = null;
-    if ($config->forwardToMail) {
-        ini_set('default_socket_timeout', '15');
-        $mailer = new RecordingMailer(new Mailer(Transport::fromDsn($config->smtpDsn)),
-            $config->mailFrom, $config->mailTo, $config->subjectPrefix);
-    }
+    $errorResponder->setLogPath($config->logging->path());
+    $services = $bootstrap->assemble($config);
+    $storage = $services->storage;
+    $mailer = $services->mailer;
+    $todoist = $services->todoist;
 } catch (Throwable $exception) {
     if (($request->server['REQUEST_METHOD'] ?? '') !== 'POST') {
         $errorResponder->send(new Response(405, ['error' => 'Use POST.'], ['Allow' => 'POST']));

@@ -8,6 +8,7 @@ use Pebble\Services\FileLogger;
 final class ErrorResponder
 {
     private ?FileLogger $logger = null;
+    private bool $phpErrorLog = false;
 
     public function __construct(private string $logPath, private bool $debugMode = false)
     {
@@ -22,11 +23,31 @@ final class ErrorResponder
         ini_set('log_errors', $debugMode ? '0' : '1');
     }
 
+    public function setLogPath(string $path): void
+    {
+        if ($path !== $this->logPath) {
+            $this->logger = null;
+        }
+        $this->logPath = $path;
+        $this->phpErrorLog = false;
+    }
+
+    public function usePhpErrorLog(): void
+    {
+        $this->phpErrorLog = true;
+        $this->logger = null;
+    }
+
     public function send(Response $response): void
     {
         if (!$this->debugMode) {
-            $this->logger ??= new FileLogger($this->logPath);
-            $this->logger->error($response->status, json_encode($response->body, JSON_UNESCAPED_SLASHES));
+            if ($this->phpErrorLog) {
+                error_log('Pebble webhook: HTTP ' . $response->status . ': '
+                    . json_encode($response->body, JSON_UNESCAPED_SLASHES));
+            } else {
+                $this->logger ??= new FileLogger($this->logPath);
+                $this->logger->error($response->status, json_encode($response->body, JSON_UNESCAPED_SLASHES));
+            }
         }
         $response->send($this->debugMode);
     }
