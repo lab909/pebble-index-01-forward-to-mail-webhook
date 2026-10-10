@@ -4,3 +4,4 @@
 /recordings/
 /logs/
 /.idea
+__pycache__/

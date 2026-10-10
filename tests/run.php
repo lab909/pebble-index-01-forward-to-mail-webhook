@@ -111,6 +111,11 @@ try {
     $minimal = ['WEBHOOK_TOKEN' => 'test-token', 'APP_TIMEZONE' => 'UTC',
         'STORE_TO_FOLDER' => 'false', 'FORWARD_TO_MAIL' => 'false'];
     $disabled = WebhookConfig::fromEnvironment($directory, $minimal);
+    check(!$disabled->saveToTodoist && $disabled->todoistApiToken === null, 'Todoist is disabled by default');
+    $todoistConfig = WebhookConfig::fromEnvironment($directory, array_replace($minimal, [
+        'SAVE_TO_TODOIST' => 'true', 'TODOIST_API_TOKEN' => 'todoist-secret', 'TODOIST_PARENT_PROJECT' => 'parent-id',
+    ]));
+    check($todoistConfig->saveToTodoist && $todoistConfig->todoistParentProject === 'parent-id', 'Configure Todoist independently');
     check(!$disabled->debugMode, 'Debug mode defaults to false');
     check(WebhookConfig::fromEnvironment($directory, array_replace($minimal, ['DEBUG_MODE' => 'true']))->debugMode, 'Enable debug mode');
     check(!$disabled->storeToFolder && !$disabled->forwardToMail, 'Disable both actions');

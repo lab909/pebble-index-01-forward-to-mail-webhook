@@ -10,6 +10,9 @@ use Pebble\Services\RecordingMailer;
 use Pebble\Services\RecordingStorage;
 use Pebble\Services\RequestValidator;
 use Pebble\Services\SmtpDiagnostics;
+use Pebble\Services\TodoistClient;
+use Pebble\Services\TodoistService;
+use Pebble\Exception\TodoistException;
 use Symfony\Component\Dotenv\Dotenv;
 use Symfony\Component\Mailer\Mailer;
 use Symfony\Component\Mailer\Transport;
@@ -59,6 +62,9 @@ try {
         throw $exception;
     }
     $storage = $config->storeToFolder ? new RecordingStorage($config->storageDirectory, $config->timezone) : null;
+    $todoist = $config->saveToTodoist ? new TodoistService(
+        new TodoistClient($config->todoistApiToken), $config->todoistParentProject, $config->timezone,
+    ) : null;
     $mailer = null;
     if ($config->forwardToMail) {
         ini_set('default_socket_timeout', '15');
@@ -75,9 +81,15 @@ try {
     exit;
 }
 
+if ($todoist !== null && (!isset($request->post['transcription'])
+    || !is_string($request->post['transcription']) || trim($request->post['transcription']) === '')) {
+    $errorResponder->send(new Response(400, ['error' => 'Todoist requires a non-empty transcription.']));
+    exit;
+}
+
 $recording = null;
 try {
-    if ($storage !== null || $mailer !== null) {
+    if ($storage !== null || $mailer !== null || $todoist !== null) {
         $recording = Recording::fromRequest($request, $config->timezone);
     }
     if ($storage !== null) {
@@ -88,26 +100,48 @@ try {
     exit;
 }
 
-$result = ['ok' => true, 'saved' => $storage !== null, 'emailSent' => false];
+$result = ['ok' => true, 'saved' => $storage !== null, 'emailSent' => false, 'todoistSaved' => false];
+$failures = [];
 if ($recording?->folderName !== null) {
     $result['folder'] = $recording->folderName;
 }
 if ($mailer !== null) {
     try {
         $mailer->send($recording);
+        $storage?->recordMailStatus($recording, true);
+        $result['emailSent'] = true;
     } catch (Throwable $exception) {
         if (!$config->debugMode) {
             $storage?->recordMailStatus($recording, false);
         }
-        unset($result['ok']);
-        $result['error'] = $storage !== null ? 'Saved locally, but SMTP sending failed.' : 'SMTP sending failed.';
+        $failures[] = $storage !== null ? 'Saved locally, but SMTP sending failed.' : 'SMTP sending failed.';
         if ($config->debugMode) {
             $result['smtpDebug'] = (new SmtpDiagnostics($environment))->describe($exception);
         }
-        $errorResponder->send(new Response(502, $result));
-        exit;
     }
-    $storage?->recordMailStatus($recording, true);
-    $result['emailSent'] = true;
+}
+if ($todoist !== null) {
+    try {
+        $todoistResult = $todoist->save($recording);
+        $result['todoistSaved'] = true;
+        $result['todoistProjectId'] = $todoistResult['projectId'];
+        $result['todoistTaskId'] = $todoistResult['taskId'];
+    } catch (TodoistException $exception) {
+        $failures[] = 'Todoist task or attachment saving failed.';
+        if (isset($exception->context['projectId'])) {
+            $result['todoistProjectId'] = $exception->context['projectId'];
+        }
+        if (isset($exception->context['taskId'])) {
+            $result['todoistTaskId'] = $exception->context['taskId'];
+        }
+        // API errors are sanitized in the client; never include a raw request or token.
+        $result['todoistDebug'] = ['message' => $exception->getMessage()] + $exception->context;
+    }
+}
+if ($failures !== []) {
+    unset($result['ok']);
+    $result['error'] = implode(' ', $failures);
+    $errorResponder->send(new Response(502, $result));
+    exit;
 }
 (new Response(200, $result))->send();

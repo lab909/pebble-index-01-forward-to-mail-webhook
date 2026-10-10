@@ -45,7 +45,7 @@ final readonly class SmtpDiagnostics
         }, $text);
 
         $secrets = [];
-        foreach (['SMTP_USERNAME', 'SMTP_PASSWORD', 'WEBHOOK_TOKEN'] as $name) {
+        foreach (['SMTP_USERNAME', 'SMTP_PASSWORD', 'WEBHOOK_TOKEN', 'TODOIST_API_TOKEN'] as $name) {
             $value = $this->environment[$name] ?? null;
             if (is_string($value) && $value !== '') {
                 array_push($secrets, $value, rawurlencode($value), urlencode($value), base64_encode($value));

@@ -19,6 +19,9 @@ final readonly class WebhookConfig
         public bool $storeToFolder,
         public bool $forwardToMail,
         public bool $debugMode = false,
+        public bool $saveToTodoist = false,
+        public ?string $todoistApiToken = null,
+        public ?string $todoistParentProject = null,
     ) {
     }
 
@@ -45,15 +48,27 @@ final readonly class WebhookConfig
         if ($webhookToken === 'CHANGE-ME-TO-A-LONG-RANDOM-TOKEN') {
             throw new RuntimeException('Configure the webhook token.');
         }
-        $boolean = static function (string $name) use ($environment): bool {
-            $value = filter_var($environment[$name] ?? 'true', FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
-            if ($value === null || ($environment[$name] ?? 'true') === '') {
+        $boolean = static function (string $name, bool $default = true) use ($environment): bool {
+            $value = filter_var($environment[$name] ?? ($default ? 'true' : 'false'), FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+            if ($value === null || ($environment[$name] ?? ($default ? 'true' : 'false')) === '') {
                 throw new RuntimeException('Invalid boolean configuration: ' . $name);
             }
             return $value;
         };
         $storeToFolder = $boolean('STORE_TO_FOLDER');
         $forwardToMail = $boolean('FORWARD_TO_MAIL');
+        $saveToTodoist = $boolean('SAVE_TO_TODOIST', false);
+        $todoistApiToken = $todoistParentProject = null;
+        if ($saveToTodoist) {
+            $todoistApiToken = $required('TODOIST_API_TOKEN');
+            $todoistParentProject = $required('TODOIST_PARENT_PROJECT');
+            if (strpbrk($todoistApiToken, "\r\n") !== false) {
+                throw new RuntimeException('Invalid TODOIST_API_TOKEN.');
+            }
+            if (!extension_loaded('curl')) {
+                throw new RuntimeException('Todoist requires the PHP cURL extension.');
+            }
+        }
         $timezone = new DateTimeZone($required('APP_TIMEZONE'));
         $storageDirectory = null;
         if ($storeToFolder) {
@@ -88,6 +103,7 @@ final readonly class WebhookConfig
         }
 
         return new self($webhookToken, $storageDirectory, $timezone, $dsn,
-            $mailFrom, $mailTo, $subjectPrefix, $storeToFolder, $forwardToMail, self::debugModeFromEnvironment($environment));
+            $mailFrom, $mailTo, $subjectPrefix, $storeToFolder, $forwardToMail, self::debugModeFromEnvironment($environment),
+            $saveToTodoist, $todoistApiToken, $todoistParentProject);
     }
 }

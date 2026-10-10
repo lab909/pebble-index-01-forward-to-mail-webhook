@@ -1,6 +1,7 @@
-# Pebble webhook with SMTP email
+# Pebble webhook with SMTP email and Todoist
 
-Requires PHP 8.2+, Composer, and PHP OpenSSL support. The receiver uses Symfony
+Requires PHP 8.2+, Composer, and PHP OpenSSL support. Todoist also requires
+the PHP cURL extension. The receiver uses Symfony
 Mailer and Symfony Dotenv as standalone components; no Symfony application is
 needed. Composer resolves dependencies against PHP 8.2 so the lock file also
 works on PHP 8.2 when dependencies are updated on a newer PHP installation.
@@ -37,12 +38,15 @@ The web server's PHP user needs write access to the project directory to create
 `public/` is the document root. Application code lives alongside it in `src/`,
 autoloaded by Composer under the `Pebble\` namespace:
 
-- `public/webhook.php`: loads configuration and coordinates validation, storage, and email.
+- `public/webhook.php`: loads configuration and coordinates validation, storage, email, and Todoist.
 - `src/Config/WebhookConfig.php`: validates environment settings.
 - `src/Services/FileLogger.php`: writes private error logs.
 - `src/Services/RequestValidator.php`: checks authentication and multipart payloads.
 - `src/Services/RecordingStorage.php`: saves recordings, cleans incomplete writes, and records mail status.
 - `src/Services/RecordingMailer.php`: builds and sends emails through Symfony Mailer.
+- `src/Services/TodoistClient.php`: calls the Todoist API and uploads files.
+- `src/Services/TodoistService.php`: finds or creates monthly projects, then creates tasks and attachment comments.
+- `src/Exception/TodoistException.php`: preserves partial task IDs and failure stages.
 - `src/Http/`: request and JSON response classes.
 - `src/Recording/Recording.php`: recording metadata and audio path passed between services.
 
@@ -51,11 +55,13 @@ In DDEV, run Composer and PHP commands with `ddev composer` and `ddev php`.
 
 ## Optional actions
 
-Set these independently in `.env` (both default to `true` when omitted):
+Set these independently in `.env`. Storage and email default to `true` when
+omitted; Todoist defaults to `false`:
 
 ```dotenv
 STORE_TO_FOLDER=true
 FORWARD_TO_MAIL=true
+SAVE_TO_TODOIST=false
 ```
 
 | STORE_TO_FOLDER | FORWARD_TO_MAIL | Behavior |
@@ -63,13 +69,60 @@ FORWARD_TO_MAIL=true
 | true | true | Save locally and send email. |
 | true | false | Save locally; no SMTP configuration is needed. |
 | false | true | Send email using in-memory metadata and PHP's temporary upload; no recording folder is created. |
-| false | false | Validate and acknowledge the webhook without saving or emailing. |
+| false | false | Skip local storage and email; Todoist may still run if enabled. |
 
 `STORAGE_DIRECTORY` is required only for local storage. SMTP and `MAIL_*`
 settings are required only for email. The token and timezone are always required.
-The response includes `saved` and `emailSent`; `folder` is included only when
+The response includes `saved`, `emailSent`, and `todoistSaved`; `folder` is included only when
 files were saved. Successful enabled actions return HTTP 200, including when
-both actions are disabled. Invalid boolean settings return HTTP 500.
+all three actions are disabled. Invalid boolean settings return HTTP 500.
+
+## Todoist settings
+
+Enable Todoist and configure a personal API token and parent project:
+
+```dotenv
+SAVE_TO_TODOIST=true
+TODOIST_API_TOKEN='your-personal-api-token'
+TODOIST_PARENT_PROJECT='your-parent-project-id'
+```
+
+The token and parent ID are required only when Todoist is enabled. Use the v1
+project ID from Todoist's API, which can contain letters as well as digits.
+This uses API-token authentication rather than OAuth and the
+[Todoist API v1](https://developer.todoist.com/api/v1/).
+
+On each valid webhook, the service searches all active projects, following
+pagination, for a child of `TODOIST_PARENT_PROJECT` named for the receipt month
+in `APP_TIMEZONE` (for example, `April 2026`). It creates that child on first use
+and reuses it for subsequent requests. No scheduler is needed. The note's
+`recordedAt` timestamp does not determine the project month. Project lookup and
+creation are serialized across PHP workers on the same server using a lock in
+the system temporary directory. Multiple servers do not share that lock.
+
+Each request creates a new task with the full transcription as `content` and
+no due date. A non-empty string transcription is required when Todoist is
+enabled; missing or invalid transcription returns HTTP 400 before any storage,
+email, or API calls. The service uploads `audio.m4a` when present and `info.txt`
+to Todoist. Each file is attached to its own task comment because the API accepts
+one attachment per comment. With local storage disabled, audio comes directly
+from PHP's temporary upload and `info.txt` is uploaded from memory.
+
+Successful delivery adds `todoistProjectId` and `todoistTaskId` to the response
+and sets `todoistSaved=true` after all attachment comments are created. Todoist
+and email are attempted independently: an SMTP failure does not prevent Todoist
+saving, and a Todoist failure does not undo an accepted email. Either failure
+returns HTTP 502; completed local recordings are retained. In production the
+error body is empty and sanitized details are logged. Debug mode exposes
+`todoistDebug` with the failed stage, API message, and partial task IDs, with the
+API token redacted. A task created before an upload/comment failure is retained,
+and its ID is included in debug output and the private log.
+
+The integration is synchronous and has no automatic retry. Repeated webhook
+deliveries create new tasks, including after partial failures. Todoist account
+limits apply to projects, comments, and upload sizes; check partial task IDs
+before resending a failed request. Allow enough PHP/web-server execution time
+for the audio upload; the outbound upload timeout is five minutes.
 
 ## SMTP settings
 
@@ -117,7 +170,7 @@ code with an empty response body.
 Non-POST requests return 405; missing or incorrect tokens return 401. Successful
 requests still return JSON. Error details are written to `logs/webhook.log`,
 outside the public directory, including validation, configuration, storage, and
-SMTP failures. Tokens and SMTP credentials are excluded from the log.
+SMTP and Todoist failures. Tokens and SMTP credentials are excluded from the log.
 
 Set `DEBUG_MODE=true` in `.env` to return meaningful JSON errors instead of
 writing error messages to `logs/webhook.log` or failure messages to
@@ -160,6 +213,7 @@ arrives with both attachments. Omit the audio field to test text-only delivery.
 Invalid tokens should return HTTP 401 without saving or sending anything.
 
 The regression checks use temporary storage and test mailers. HTTP checks require
-Python 3 and OpenSSL and use a local TLS SMTP stub. They cover all four setting
-combinations, validation, file cleanup, attachments, and SMTP failures.
-SMTP delivery still needs to be verified against your configured provider.
+Python 3 and OpenSSL and use local SMTP and Todoist API stubs. They cover
+feature switches, validation, file cleanup, attachments, SMTP failures, monthly
+project pagination/reuse, timezone boundaries, and partial Todoist failures.
+Live Todoist delivery still needs to be verified with your configured account.
