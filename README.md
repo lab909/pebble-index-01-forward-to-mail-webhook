@@ -29,9 +29,13 @@ processing before forwarding. The hub currently has no queue or automatic retry.
 See the [implementation plan](docs/IMPLEMENTATION_PLAN.md) for the planned
 operation pipeline, package-based extensions, Monolog log rotation, and failure
 notification emails. Its checkboxes track future implementation; these roadmap
-features are not yet available in the running hub. Phases 1–3 are complete; the
+features are not yet available in the running hub. Phases 1–4 are complete; the
 [compatibility baseline](docs/COMPATIBILITY_BASELINE.md) records current behavior
 and the regression checks that later refactoring must preserve.
+
+Phase 4 provides a tested operation registry and runner. The live webhook still
+uses its existing destination coordination; Phase 5 supplies destination adapters,
+and Phase 6 connects the runner to the thin HTTP entry point.
 
 ## Requirements
 
@@ -75,6 +79,8 @@ The web server's PHP user needs write access to the project directory to create
 autoloaded by Composer under the `Pebble\` namespace:
 
 - `public/webhook.php`: loads configuration and coordinates validation, storage, email, and Todoist.
+- `config/operations.php`: declares destination IDs, switches, order, and failure policy for the operation pipeline.
+- `src/Operation/`: operation contracts, lazy registry, typed results, and destination-independent runner; see the [operation contract](docs/OPERATIONS.md).
 - `src/Bootstrap.php`: loads the environment once and constructs enabled services without executing them.
 - `src/Config/`: separate core, storage, email, Todoist, and logging settings with shared validation; `WebhookConfig` aggregates them. `AlertConfig` prepares failure notification settings for Phase 8.
 - `src/Services/FileLogger.php`: writes private error logs.
@@ -255,6 +261,7 @@ find src public tests -name '*.php' -exec php -l {} \;
 php tests/run.php
 php tests/config.php
 php tests/note.php
+php tests/operations.php
 python3 tests/http.py
 python3 tests/bootstrap_http.py
 ```

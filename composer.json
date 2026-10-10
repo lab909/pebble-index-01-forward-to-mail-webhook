@@ -5,7 +5,8 @@
     "require": {
         "php": ">=8.2",
         "symfony/mailer": "^7.3",
-        "symfony/dotenv": "^7.3"
+        "symfony/dotenv": "^7.3",
+        "psr/log": "^3.0"
     },
     "autoload": {
         "psr-4": {

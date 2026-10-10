@@ -209,28 +209,53 @@ interface OperationFactoryInterface
 logger and request context. Destination settings/clients belong in their own
 factories. Avoid giving every operation a global service locator.
 
-- [ ] Define `OperationDefinition` with a unique ID, enabled setting, factory,
+- [x] Define `OperationDefinition` with a unique ID, enabled setting, factory,
       deterministic order, and failure policy (`abort` or `continue`).
-- [ ] Define typed validation failures and `OperationResult` outcomes with stable
+- [x] Define typed validation failures and `OperationResult` outcomes with stable
       error categories, sanitized diagnostics, external IDs, and partial progress.
-- [ ] Include an explicit HTTP failure classification in results; the runner must
+- [x] Include an explicit HTTP failure classification in results; the runner must
       not contain `if todoist` or `if email` branches.
-- [ ] Keep runtime/timing metadata in execution reports rather than service return
+- [x] Keep runtime/timing metadata in execution reports rather than service return
       values where the runner can measure it consistently.
-- [ ] Register local storage, email, and Todoist in `config/operations.php`.
-- [ ] Reject duplicate IDs, invalid factories, and unsupported failure policies
+- [x] Register local storage, email, and Todoist in `config/operations.php`.
+- [x] Reject duplicate IDs, invalid factories, and unsupported failure policies
       during bootstrap before any destination runs.
-- [ ] Load only enabled factories; installing a package must not enable it.
-- [ ] Validate every enabled operation's note requirements before execution begins.
-- [ ] Execute in registry order: local storage first, email next, Todoist next.
-- [ ] Adapt expected destination failures into results and catch unexpected
+- [x] Load only enabled factories; installing a package must not enable it.
+- [x] Validate every enabled operation's note requirements before execution begins.
+- [x] Execute in registry order: local storage first, email next, Todoist next.
+- [x] Adapt expected destination failures into results and catch unexpected
       exceptions at the runner boundary.
-- [ ] Aggregate independent failures without discarding successful operation results.
-- [ ] Preserve partial task/comment IDs and distinguish full success from partial
+- [x] Aggregate independent failures without discarding successful operation results.
+- [x] Preserve partial task/comment IDs and distinguish full success from partial
       delivery.
 
 **Done when:** the runner handles an arbitrary registered operation without knowing
 its destination-specific API or configuration.
+
+**Completed 2026-10-11 on PHP 8.2.33.** The destination-independent registry and
+runner now implement the contracts above. Definitions in `config/operations.php`
+register local storage, email, and Todoist with existing switches, deterministic
+order, and abort/continue policies. `Bootstrap::prepareOperations()` resolves
+explicit factory bindings and loads only enabled factories. Missing extension
+switches default to disabled; installing a package does not activate it.
+
+Factories receive explicit PSR-3 logging infrastructure and request context.
+The runner completes all preflight checks before execution, retains typed expected
+failures and partial IDs/progress, sanitizes unexpected exceptions, and measures
+execution timing in reports. HTTP classification is explicit in results, with
+internal errors taking precedence over upstream failures and validation errors.
+
+This is the pipeline foundation: the live endpoint still uses the existing
+coordination. Built-in adapter/factory bindings are supplied in Phase 5, and the
+HTTP integration is Phase 6. See [the operation contract](OPERATIONS.md).
+
+Validation: registry/runner tests cover invalid catalogues and factories, disabled
+class/provider loading, deterministic ties, preflight failures, generic unexpected
+failures, retained successes and partial progress, and abort/continue behavior.
+Existing configuration, note lifecycle, bootstrap HTTP, and destination regression
+suites remain unchanged in behavior and pass on PHP 8.2; syntax, Composer, platform,
+and diff checks also pass. PSR-3 is now a direct dependency, using the already locked
+`psr/log` version without upgrading packages.
 
 ## Phase 5 — migrate the existing destinations
 

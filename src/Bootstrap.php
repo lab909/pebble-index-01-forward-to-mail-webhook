@@ -32,6 +32,28 @@ final class Bootstrap
         return $this->environment;
     }
 
+    /** Prepare the operation pipeline independently of the legacy HTTP coordinator.
+     *  Built-in destination adapters are supplied during the Phase 5 migration.
+     *  @param array<string, \Pebble\Operation\OperationFactoryInterface|class-string|Closure> $factories
+     */
+    public function prepareOperations(
+        WebhookConfig $config,
+        array $factories,
+        \Pebble\Operation\OperationDependencies $dependencies,
+        array $additionalEnabledSettings = [],
+    ): \Pebble\Operation\OperationRegistry {
+        $definitions = require $this->projectDirectory . '/config/operations.php';
+        if (!is_array($definitions)) {
+            throw new \Pebble\Config\ConfigurationException('Invalid operations configuration.');
+        }
+        $settings = array_replace($additionalEnabledSettings, [
+            'STORE_TO_FOLDER' => $config->storeToFolder,
+            'FORWARD_TO_MAIL' => $config->forwardToMail,
+            'SAVE_TO_TODOIST' => $config->saveToTodoist,
+        ]);
+        return \Pebble\Operation\OperationRegistry::fromConfiguration($definitions, $settings, $factories, $dependencies);
+    }
+
     public function assemble(WebhookConfig $config): BootstrappedServices
     {
         $storage = $config->storage === null ? null : new RecordingStorage($config->storage->directory, $config->core->timezone);
