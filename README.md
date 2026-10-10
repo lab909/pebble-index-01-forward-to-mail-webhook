@@ -1,4 +1,30 @@
-# Pebble webhook with SMTP email and Todoist
+# Pebble Index 01 Webhook Hub
+
+Pebble Index 01 Webhook Hub is a PHP webhook receiver for notes created with
+Pebble's Index 01 ring. When Pebble sends a new note, the hub authenticates and
+validates the request, then forwards its transcription, audio, and POST data
+to the destinations enabled in your configuration.
+
+The hub currently supports three destinations:
+
+| Destination | What it receives | Enable or disable in `.env` |
+| --- | --- | --- |
+| Local directory | A timestamped folder containing `audio.m4a` when provided and `info.txt` with POST fields and selected request metadata. | `STORE_TO_FOLDER=true` / `false` |
+| Email through SMTP | The transcription as the email body, with `info.txt` and any audio attached. | `FORWARD_TO_MAIL=true` / `false` |
+| Todoist | A task containing the transcription in a monthly subproject, with audio and `info.txt` attached to separate task comments. No due date is set. | `SAVE_TO_TODOIST=true` / `false` |
+
+Every destination is optional. Enable any combination, including Todoist or
+email without local storage. Credentials and destination-specific settings are
+required only for enabled destinations. With all destinations disabled, the hub
+still authenticates and validates the webhook, then acknowledges it without
+saving or forwarding the note.
+
+Destinations run synchronously during the webhook request. Email and Todoist are
+attempted independently, so a failure in one does not prevent the other from
+running. Request validation, configuration, and local storage failures stop
+processing before forwarding. The hub currently has no queue or automatic retry.
+
+## Requirements
 
 Requires PHP 8.2+, Composer, and PHP OpenSSL support. Todoist also requires
 the PHP cURL extension. The receiver uses Symfony
@@ -15,7 +41,8 @@ composer install --no-dev --optimize-autoloader
 cp .env.example .env
 ```
 
-Edit `.env` with your webhook token, SMTP credentials, sender and recipient.
+Edit `.env` with your webhook token, destination switches, and the settings
+for the destinations you enable.
 Set your website's document root to this project's `public/` directory. The
 endpoint is then `https://your-domain.example/webhook.php`. Keep `.env`,
 `src/`, `vendor/`, `logs/`, and `recordings/` outside the public directory.
@@ -64,15 +91,10 @@ FORWARD_TO_MAIL=true
 SAVE_TO_TODOIST=false
 ```
 
-| STORE_TO_FOLDER | FORWARD_TO_MAIL | Behavior |
-| --- | --- | --- |
-| true | true | Save locally and send email. |
-| true | false | Save locally; no SMTP configuration is needed. |
-| false | true | Send email using in-memory metadata and PHP's temporary upload; no recording folder is created. |
-| false | false | Skip local storage and email; Todoist may still run if enabled. |
-
 `STORAGE_DIRECTORY` is required only for local storage. SMTP and `MAIL_*`
-settings are required only for email. The token and timezone are always required.
+settings are required only for email. `TODOIST_API_TOKEN` and
+`TODOIST_PARENT_PROJECT` are required only for Todoist. The webhook token and
+timezone are always required.
 The response includes `saved`, `emailSent`, and `todoistSaved`; `folder` is included only when
 files were saved. Successful enabled actions return HTTP 200, including when
 all three actions are disabled. Invalid boolean settings return HTTP 500.
