@@ -3,10 +3,9 @@ declare(strict_types=1);
 
 namespace Pebble\Services;
 
-use DateTimeImmutable;
 use DateTimeZone;
 use Pebble\Exception\TodoistException;
-use Pebble\Recording\Recording;
+use Pebble\Note\Note;
 use Throwable;
 
 final readonly class TodoistService
@@ -18,16 +17,15 @@ final readonly class TodoistService
     ) {
     }
 
-    public function save(Recording $recording): array
+    public function save(Note $note): array
     {
-        $info = json_decode($recording->text, true, flags: JSON_THROW_ON_ERROR);
-        $transcription = $info['postFields']['transcription'] ?? null;
-        if (!is_string($transcription) || trim($transcription) === '') {
+        $transcription = $note->transcription;
+        if (trim($transcription) === '') {
             throw new TodoistException('Todoist requires a non-empty transcription.');
         }
         $context = ['stage' => 'monthly project lookup', 'commentsCreated' => 0];
         try {
-            $month = (new DateTimeImmutable($info['receivedAt']))->setTimezone($this->timezone)->format('F Y');
+            $month = $note->receivedAt->setTimezone($this->timezone)->format('F Y');
             $projectId = $this->monthlyProject($month);
             $context['projectId'] = $projectId;
             $context['stage'] = 'task creation';
@@ -35,15 +33,15 @@ final readonly class TodoistService
             $taskId = $this->id($task);
             $context['taskId'] = $taskId;
 
-            if ($recording->audioPath !== null) {
+            if ($note->audio !== null) {
                 $context['stage'] = 'audio upload';
-                $attachment = $this->client->uploadAudio($recording->audioPath, $projectId);
+                $attachment = $this->client->uploadAudio($note->audio->path, $projectId);
                 $context['stage'] = 'audio comment creation';
                 $this->comment($taskId, 'Audio recording', $attachment);
                 ++$context['commentsCreated'];
             }
             $context['stage'] = 'info.txt upload';
-            $attachment = $this->client->uploadInfo($recording->text, $projectId);
+            $attachment = $this->client->uploadInfo($note->infoText, $projectId);
             $context['stage'] = 'info.txt comment creation';
             $this->comment($taskId, 'Webhook information', $attachment);
             ++$context['commentsCreated'];

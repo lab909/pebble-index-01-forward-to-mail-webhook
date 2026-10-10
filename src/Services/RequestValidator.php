@@ -43,6 +43,10 @@ final readonly class RequestValidator
             if ($audio['error'] !== UPLOAD_ERR_OK) {
                 return new Response(400, ['error' => 'Audio upload failed.', 'uploadError' => $audio['error']]);
             }
+            if ((isset($audio['name']) && !is_string($audio['name']))
+                || (isset($audio['type']) && !is_string($audio['type']))) {
+                return new Response(400, ['error' => 'Invalid audio upload.']);
+            }
             if (!isset($audio['tmp_name']) || !is_string($audio['tmp_name'])
                 || !is_uploaded_file($audio['tmp_name'])) {
                 return new Response(400, ['error' => 'Invalid uploaded audio file.']);

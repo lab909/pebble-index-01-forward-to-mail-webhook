@@ -145,30 +145,48 @@ production credentials or contacting destinations.
 
 ## Phase 3 — introduce the typed note and audio lifecycle
 
-- [ ] Add an immutable `Note` with transcription, all POST fields, receipt time,
+- [x] Add an immutable `Note` with transcription, all POST fields, receipt time,
       recording time, timezone, selected request metadata, and optional audio.
-- [ ] Add `NoteFactory` so input normalization occurs once after authentication.
-- [ ] Preserve the complete POST data even when a destination needs only text.
-- [ ] Generate `info.txt` consistently from the note; preserve current names,
+- [x] Add `NoteFactory` so input normalization occurs once after authentication.
+- [x] Preserve the complete POST data even when a destination needs only text.
+- [x] Generate `info.txt` consistently from the note; preserve current names,
       JSON formatting, metadata selection, and exclusion of authorization.
-- [ ] Replace repeated `json_decode($recording->text)` calls in destination services
+- [x] Replace repeated `json_decode($recording->text)` calls in destination services
       with typed note access.
-- [ ] Model `AudioAsset` with path, size, original filename, reported MIME type,
+- [x] Model `AudioAsset` with path, size, original filename, reported MIME type,
       and ownership/lifetime information.
-- [ ] Validate PHP uploads at the HTTP boundary; operations receive only validated
+- [x] Validate PHP uploads at the HTTP boundary; operations receive only validated
       assets, never raw `$_FILES` entries.
-- [ ] Keep the original audio readable throughout synchronous execution. Local
+- [x] Keep the original audio readable throughout synchronous execution. Local
       storage should copy the validated upload instead of moving the shared source
       out from under other operations.
-- [ ] Remove incomplete stored copies on local-write failure without deleting
+- [x] Remove incomplete stored copies on local-write failure without deleting
       the shared input or successful results from other operations.
-- [ ] Rely on PHP to clean up PHP-owned upload files; clean up only hub-owned
+- [x] Rely on PHP to clean up PHP-owned upload files; clean up only hub-owned
       temporary files in `finally` blocks.
-- [ ] Document that queued execution will require durable assets before the
+- [x] Document that queued execution will require durable assets before the
       request ends; this iteration must not enqueue temporary upload paths.
 
 **Done when:** each destination can consume the same note independently, regardless
 of whether local storage is enabled.
+
+**Completed 2026-10-11 on PHP 8.2.33.** `NoteFactory` converts validated HTTP
+input into an immutable `Note` with a shared, compatible `info.txt` representation.
+Email and Todoist now use typed transcription, dates, and audio without decoding
+metadata. `AudioAsset` records file size, original name, reported MIME type, and
+explicit PHP-upload, hub-temporary, or durable ownership.
+
+Local storage copies the shared input and returns a separate `StoredRecording`.
+Incomplete outputs are removed on failure; the source and earlier successful
+outputs are retained. The endpoint uses `finally` for hub-owned cleanup and leaves
+PHP-owned uploads to PHP. Obsolete `Recording` plumbing was removed as part of this
+migration; destination wrappers and the operation runner remain later-phase work.
+
+Validation: PHP 8.2 regression suites, typed-note/audio lifecycle checks, and HTTP
+checks across all destination combinations, including an assertion that actual PHP
+uploads remain intact after storage. Existing response shapes, metadata formatting,
+private permissions, SMTP diagnostics, and partial Todoist results are preserved.
+Tests use temporary files and local stubs, without production credentials.
 
 ## Phase 4 — define the operation contract and registry
 
@@ -458,7 +476,7 @@ and logging/notification failure paths are tested on PHP 8.2.
 
 ## Suggested implementation milestones
 
-- [ ] **Milestone A:** compatibility baseline, configuration, and typed note
+- [x] **Milestone A:** compatibility baseline, configuration, and typed note
       (phases 1–3).
 - [ ] **Milestone B:** operation registry, migrated destinations, thin entry point
       (phases 4–6).

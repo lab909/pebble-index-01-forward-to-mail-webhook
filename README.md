@@ -29,7 +29,7 @@ processing before forwarding. The hub currently has no queue or automatic retry.
 See the [implementation plan](docs/IMPLEMENTATION_PLAN.md) for the planned
 operation pipeline, package-based extensions, Monolog log rotation, and failure
 notification emails. Its checkboxes track future implementation; these roadmap
-features are not yet available in the running hub. Phases 1 and 2 are complete; the
+features are not yet available in the running hub. Phases 1–3 are complete; the
 [compatibility baseline](docs/COMPATIBILITY_BASELINE.md) records current behavior
 and the regression checks that later refactoring must preserve.
 
@@ -85,7 +85,9 @@ autoloaded by Composer under the `Pebble\` namespace:
 - `src/Services/TodoistService.php`: finds or creates monthly projects, then creates tasks and attachment comments.
 - `src/Exception/TodoistException.php`: preserves partial task IDs and failure stages.
 - `src/Http/`: request and JSON response classes.
-- `src/Recording/Recording.php`: recording metadata and audio path passed between services.
+- `src/Note/`: immutable note data and audio assets with explicit ownership.
+- `src/Http/NoteFactory.php`: converts validated HTTP input into a note and generates shared metadata.
+- `src/Recording/StoredRecording.php`: local folder and file paths returned by storage.
 
 After changing Composer autoload settings, run `composer dump-autoload --optimize`.
 In DDEV, run Composer and PHP commands with `ddev composer` and `ddev php`.
@@ -195,6 +197,25 @@ Increase PHP `upload_max_filesize` and `post_max_size`, and any web server reque
 limits, as needed. Your SMTP provider's message-size limit must also accommodate
 the audio attachment (base64 attachment encoding adds about one third to its size).
 
+## Note and audio lifecycle
+
+After authentication and request validation, the hub creates one immutable `Note`
+for the enabled destinations. It contains the transcription, complete POST data,
+receipt and recording times, timezone, selected headers, and optional `AudioAsset`.
+All destinations use the same generated `info.txt` content; email and Todoist read
+the transcription directly from the note. Authorization is excluded from metadata.
+
+Local storage copies the validated PHP upload to `audio.m4a`; the shared source
+remains readable until all synchronous destinations finish. Storage returns a
+separate `StoredRecording`, leaving the note unchanged. Failed local writes remove
+only their incomplete folder and copies. The current storage failure policy still
+stops forwarding, and successful stored files survive later destination failures.
+
+PHP removes PHP-owned uploads when the request ends. The hub cleans up only assets
+explicitly marked as hub-owned temporary files, using `finally`; durable files stay
+with their owner. There is no queue in this phase. Future queued operations must
+first persist audio durably and must never enqueue a temporary upload path.
+
 ## Error logging
 
 With `DEBUG_MODE=false` (the default), webhook errors return only the HTTP status
@@ -233,6 +254,7 @@ First check the syntax:
 find src public tests -name '*.php' -exec php -l {} \;
 php tests/run.php
 php tests/config.php
+php tests/note.php
 python3 tests/http.py
 python3 tests/bootstrap_http.py
 ```

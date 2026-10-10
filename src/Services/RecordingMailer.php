@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 namespace Pebble\Services;
 
-use Pebble\Recording\Recording;
+use Pebble\Note\Note;
 use Symfony\Component\Mailer\MailerInterface;
 use Symfony\Component\Mime\Email;
 use Symfony\Component\Mime\Part\DataPart;
@@ -23,17 +23,14 @@ final readonly class RecordingMailer
         $this->email = (new Email())->from($from)->to($to);
     }
 
-    public function send(Recording $recording): void
+    public function send(Note $note): void
     {
-        $info = json_decode($recording->text, true, flags: JSON_THROW_ON_ERROR);
-        $transcription = $info['postFields']['transcription'] ?? '';
-
         $email = clone $this->email;
-        $email->subject($this->subjectPrefix . ' ' . $recording->recordedAt->format('Y-m-d H:i:s'))
-            ->text(is_string($transcription) ? $transcription : '')
-            ->addPart(new DataPart($recording->text, 'info.txt', 'text/plain'));
-        if ($recording->audioPath !== null) {
-            $email->addPart(new DataPart(new File($recording->audioPath), 'audio.m4a', 'audio/mp4'));
+        $email->subject($this->subjectPrefix . ' ' . $note->recordedAt->format('Y-m-d H:i:s'))
+            ->text($note->transcription)
+            ->addPart(new DataPart($note->infoText, 'info.txt', 'text/plain'));
+        if ($note->audio !== null) {
+            $email->addPart(new DataPart(new File($note->audio->path), 'audio.m4a', 'audio/mp4'));
         }
         $this->mailer->send($email);
     }

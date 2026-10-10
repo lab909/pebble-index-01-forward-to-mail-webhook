@@ -4,7 +4,10 @@ declare(strict_types=1);
 require dirname(__DIR__) . '/vendor/autoload.php';
 
 use Pebble\Config\WebhookConfig;
-use Pebble\Recording\Recording;
+use Pebble\Note\Note;
+use Pebble\Note\AudioAsset;
+use Pebble\Note\AssetOwnership;
+use Pebble\Http\NoteFactory;
 use Pebble\Http\Request;
 use Pebble\Services\RecordingMailer;
 use Pebble\Services\RecordingStorage;
@@ -78,8 +81,10 @@ try {
 
     $storage = new RecordingStorage($config->storageDirectory, $config->timezone);
     $service = new RecordingMailer($mailer, $config->mailFrom, $config->mailTo, $config->subjectPrefix);
-    $recording = $storage->save(Recording::fromRequest(new Request($server, $post, []), $config->timezone));
-    $service->send($recording);
+    $noteFactory = new NoteFactory($config->timezone);
+    $note = $noteFactory->fromRequest(new Request($server, $post, []));
+    $recording = $storage->save($note);
+    $service->send($note);
     $storage->recordMailStatus($recording, true);
     $folder = $recording->folder;
     $info = json_decode(file_get_contents($folder . '/info.txt'), true, flags: JSON_THROW_ON_ERROR);
@@ -101,22 +106,22 @@ try {
     // Email-only delivery attaches upload data without creating storage files.
     $audioPath = $directory . '/upload.m4a';
     file_put_contents($audioPath, 'sample audio');
-    $emailOnly = Recording::fromRequest(new Request($server, $post, ['audio' => [
-        'tmp_name' => $audioPath, 'name' => 'upload.m4a', 'type' => 'audio/mp4',
-    ]]), $config->timezone);
+    $emailOnly = new Note($note->transcription, $note->postFields, $note->receivedAt,
+        $note->recordedAt, $note->timezone, $note->headers,
+        new AudioAsset($audioPath, 'upload.m4a', 'audio/mp4', AssetOwnership::DurableFile));
     $before = glob($config->storageDirectory . '/*');
     $service->send($emailOnly);
     check(count($mailer->messages[1]->getAttachments()) === 2, 'Attach audio and info');
     check(str_contains($mailer->messages[1]->toString(), 'audio.m4a'), 'Serialize audio attachment');
-    check($emailOnly->folder === null && glob($config->storageDirectory . '/*') === $before, 'Email-only creates no recordings');
+    check(glob($config->storageDirectory . '/*') === $before, 'Email-only creates no recordings');
     check(count($email->getAttachments()) === 1, 'Keep messages independent across sends');
 
-    $service->send(Recording::fromRequest(new Request($server, ['recordedAt' => $post['recordedAt']], []), $config->timezone));
+    $service->send($noteFactory->fromRequest(new Request($server, ['recordedAt' => $post['recordedAt']], [])));
     check($mailer->messages[2]->getTextBody() === '', 'Missing transcription leaves an empty email body');
 
     $mailer->fail = true;
     try {
-        $service->send($recording);
+        $service->send($note);
         throw new LogicException('Expected sending failure');
     } catch (RuntimeException $exception) {
         $storage->recordMailStatus($recording, false);
@@ -124,9 +129,14 @@ try {
     check(is_file($folder . '/info.txt'), 'Retain files after SMTP failure');
     check(str_contains(file_get_contents($folder . '/mail-status.txt'), 'failed'), 'Record SMTP failure');
 
-    // A failed audio move removes the newly created, incomplete folder.
+    // A vanished shared input fails the copy and removes only the incomplete folder.
+    $vanishingPath = $directory . '/vanishing.m4a';
+    file_put_contents($vanishingPath, 'sample');
+    $vanishingAudio = new AudioAsset($vanishingPath, null, null, AssetOwnership::DurableFile);
+    unlink($vanishingPath);
     try {
-        @$storage->save(new Recording($recording->recordedAt, $recording->text, $directory . '/missing'));
+        @$storage->save(new Note($note->transcription, $note->postFields, $note->receivedAt,
+            $note->recordedAt, $note->timezone, $note->headers, $vanishingAudio));
         throw new LogicException('Expected storage failure');
     } catch (RuntimeException $exception) {
         check(glob($config->storageDirectory . '/*') === $before, 'Remove incomplete recording');

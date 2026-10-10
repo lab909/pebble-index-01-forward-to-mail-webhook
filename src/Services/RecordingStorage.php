@@ -5,7 +5,8 @@ namespace Pebble\Services;
 
 use DateTimeImmutable;
 use DateTimeZone;
-use Pebble\Recording\Recording;
+use Pebble\Note\Note;
+use Pebble\Recording\StoredRecording;
 use RuntimeException;
 use Throwable;
 
@@ -17,7 +18,7 @@ final readonly class RecordingStorage
     ) {
     }
 
-    public function save(Recording $recording): Recording
+    public function save(Note $note): StoredRecording
     {
         $previousUmask = umask(0077);
         $folder = null;
@@ -34,16 +35,16 @@ final readonly class RecordingStorage
             }
             $folder = $candidate;
             $audioPath = null;
-            if ($recording->audioPath !== null) {
+            if ($note->audio !== null) {
                 $audioPath = $folder . '/audio.m4a';
-                if (!move_uploaded_file($recording->audioPath, $audioPath)) {
+                if (!copy($note->audio->path, $audioPath)) {
                     throw new RuntimeException('Cannot save audio.');
                 }
             }
-            if (file_put_contents($folder . '/info.txt', $recording->text, LOCK_EX) !== strlen($recording->text)) {
+            if (file_put_contents($folder . '/info.txt', $note->infoText, LOCK_EX) !== strlen($note->infoText)) {
                 throw new RuntimeException('Cannot save webhook information.');
             }
-            return new Recording($recording->recordedAt, $recording->text, $audioPath, $folder, $folderName);
+            return new StoredRecording($folder, $folderName, $audioPath);
         } catch (Throwable $exception) {
             if ($folder !== null) {
                 @unlink($folder . '/audio.m4a');
@@ -56,11 +57,8 @@ final readonly class RecordingStorage
         }
     }
 
-    public function recordMailStatus(Recording $recording, bool $sent): void
+    public function recordMailStatus(StoredRecording $recording, bool $sent): void
     {
-        if ($recording->folder === null) {
-            return;
-        }
         $status = $sent ? "Accepted by SMTP server.\n"
             : "SMTP sending failed. Local files retained.\n";
         @file_put_contents($recording->folder . '/mail-status.txt', $status);

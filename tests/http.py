@@ -103,6 +103,15 @@ with tempfile.TemporaryDirectory(prefix='pebble-http-') as directory:
         '$bootstrap = new Bootstrap($projectDirectory, '
         'static fn (\\Pebble\\Config\\TodoistConfig $config): \\Pebble\\Services\\TodoistClient '
         f'=> new \\Pebble\\Services\\TodoistClient($config->apiToken, "{todoist.url}"));')
+    # Check the actual PHP upload remains readable after storage and PHP owns cleanup.
+    endpoint = endpoint.replace('$storedRecording = $storage->save($note);',
+        '$storedRecording = $storage->save($note); '
+        'if ($note->audio !== null) { '
+        '$note->audio->cleanup(); '
+        'if ($note->audio->ownership !== \\Pebble\\Note\\AssetOwnership::PhpUpload '
+        '|| !is_uploaded_file($note->audio->path) '
+        '|| file_get_contents($note->audio->path) !== file_get_contents($storedRecording->audioPath)) { '
+        'throw new \\RuntimeException("Shared PHP upload was lost or modified."); } }')
     (project / 'public/webhook.php').write_text(endpoint)
     (project / 'src').symlink_to(ROOT / 'src', target_is_directory=True)
     (project / 'vendor').symlink_to(ROOT / 'vendor', target_is_directory=True)
@@ -332,12 +341,12 @@ with tempfile.TemporaryDirectory(prefix='pebble-http-') as directory:
             fixture = project / 'month-boundary.php'
             fixture.write_text('''<?php
 require __DIR__ . '/vendor/autoload.php';
-$recording = new Pebble\\Recording\\Recording(new DateTimeImmutable('@0'),
-    json_encode(['receivedAt' => '2026-04-01T00:30:00+00:00',
-        'postFields' => ['transcription' => 'Timezone boundary test']]), null);
+$note = new Pebble\\Note\\Note('Timezone boundary test',
+    ['transcription' => 'Timezone boundary test'], new DateTimeImmutable('2026-04-01T00:30:00+00:00'),
+    new DateTimeImmutable('@0'), new DateTimeZone('America/Los_Angeles'), []);
 $service = new Pebble\\Services\\TodoistService(new Pebble\\Services\\TodoistClient(
     'TOKEN', 'API_URL'), 'parent-123', new DateTimeZone('America/Los_Angeles'));
-echo json_encode($service->save($recording));
+echo json_encode($service->save($note));
 '''.replace('TOKEN', TODOIST_TOKEN).replace('API_URL', todoist.url))
             subprocess.run([os.environ.get('PHP_BINARY', 'php'), str(fixture)], check=True, capture_output=True)
             assert todoist.projects[-1]['name'] == 'March 2026'

@@ -9,7 +9,7 @@ use Pebble\Config\Environment;
 use Pebble\Config\LoggingConfig;
 use Pebble\Http\Request;
 use Pebble\Http\Response;
-use Pebble\Recording\Recording;
+use Pebble\Http\NoteFactory;
 use Pebble\Http\ErrorResponder;
 use Pebble\Services\RequestValidator;
 use Pebble\Services\SmtpDiagnostics;
@@ -85,67 +85,71 @@ try {
     exit;
 }
 
-if ($todoist !== null && (!isset($request->post['transcription'])
-    || !is_string($request->post['transcription']) || trim($request->post['transcription']) === '')) {
-    $errorResponder->send(new Response(400, ['error' => 'Todoist requires a non-empty transcription.']));
-    exit;
-}
-
-$recording = null;
+$note = null;
+$storedRecording = null;
 try {
-    if ($storage !== null || $mailer !== null || $todoist !== null) {
-        $recording = Recording::fromRequest($request, $config->timezone);
-    }
-    if ($storage !== null) {
-        $recording = $storage->save($recording);
-    }
-} catch (Throwable $exception) {
-    $errorResponder->send(new Response(500, ['error' => 'Unable to process webhook. Check recording data and storage directory permissions.']));
-    exit;
-}
-
-$result = ['ok' => true, 'saved' => $storage !== null, 'emailSent' => false, 'todoistSaved' => false];
-$failures = [];
-if ($recording?->folderName !== null) {
-    $result['folder'] = $recording->folderName;
-}
-if ($mailer !== null) {
     try {
-        $mailer->send($recording);
-        $storage?->recordMailStatus($recording, true);
-        $result['emailSent'] = true;
+        if ($storage !== null || $mailer !== null || $todoist !== null) {
+            $note = (new NoteFactory($config->timezone))->fromRequest($request);
+            if ($todoist !== null && trim($note->transcription) === '') {
+                $errorResponder->send(new Response(400, ['error' => 'Todoist requires a non-empty transcription.']));
+                return;
+            }
+        }
+        if ($storage !== null) {
+            $storedRecording = $storage->save($note);
+        }
     } catch (Throwable $exception) {
-        if (!$config->debugMode) {
-            $storage?->recordMailStatus($recording, false);
-        }
-        $failures[] = $storage !== null ? 'Saved locally, but SMTP sending failed.' : 'SMTP sending failed.';
-        if ($config->debugMode) {
-            $result['smtpDebug'] = (new SmtpDiagnostics($environment))->describe($exception);
+        $errorResponder->send(new Response(500, ['error' => 'Unable to process webhook. Check recording data and storage directory permissions.']));
+        return;
+    }
+
+    $result = ['ok' => true, 'saved' => $storage !== null, 'emailSent' => false, 'todoistSaved' => false];
+    $failures = [];
+    if ($storedRecording?->folderName !== null) {
+        $result['folder'] = $storedRecording->folderName;
+    }
+    if ($mailer !== null) {
+        try {
+            $mailer->send($note);
+            $storage?->recordMailStatus($storedRecording, true);
+            $result['emailSent'] = true;
+        } catch (Throwable $exception) {
+            if (!$config->debugMode) {
+                $storage?->recordMailStatus($storedRecording, false);
+            }
+            $failures[] = $storage !== null ? 'Saved locally, but SMTP sending failed.' : 'SMTP sending failed.';
+            if ($config->debugMode) {
+                $result['smtpDebug'] = (new SmtpDiagnostics($environment))->describe($exception);
+            }
         }
     }
-}
-if ($todoist !== null) {
-    try {
-        $todoistResult = $todoist->save($recording);
-        $result['todoistSaved'] = true;
-        $result['todoistProjectId'] = $todoistResult['projectId'];
-        $result['todoistTaskId'] = $todoistResult['taskId'];
-    } catch (TodoistException $exception) {
-        $failures[] = 'Todoist task or attachment saving failed.';
-        if (isset($exception->context['projectId'])) {
-            $result['todoistProjectId'] = $exception->context['projectId'];
+    if ($todoist !== null) {
+        try {
+            $todoistResult = $todoist->save($note);
+            $result['todoistSaved'] = true;
+            $result['todoistProjectId'] = $todoistResult['projectId'];
+            $result['todoistTaskId'] = $todoistResult['taskId'];
+        } catch (TodoistException $exception) {
+            $failures[] = 'Todoist task or attachment saving failed.';
+            if (isset($exception->context['projectId'])) {
+                $result['todoistProjectId'] = $exception->context['projectId'];
+            }
+            if (isset($exception->context['taskId'])) {
+                $result['todoistTaskId'] = $exception->context['taskId'];
+            }
+            // API errors are sanitized in the client; never include a raw request or token.
+            $result['todoistDebug'] = ['message' => $exception->getMessage()] + $exception->context;
         }
-        if (isset($exception->context['taskId'])) {
-            $result['todoistTaskId'] = $exception->context['taskId'];
-        }
-        // API errors are sanitized in the client; never include a raw request or token.
-        $result['todoistDebug'] = ['message' => $exception->getMessage()] + $exception->context;
     }
+    if ($failures !== []) {
+        unset($result['ok']);
+        $result['error'] = implode(' ', $failures);
+        $errorResponder->send(new Response(502, $result));
+        return;
+    }
+    (new Response(200, $result))->send();
+} finally {
+    // PHP owns HTTP uploads. Only explicitly hub-owned temporary assets are removed.
+    $note?->audio?->cleanup();
 }
-if ($failures !== []) {
-    unset($result['ok']);
-    $result['error'] = implode(' ', $failures);
-    $errorResponder->send(new Response(502, $result));
-    exit;
-}
-(new Response(200, $result))->send();
