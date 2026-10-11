@@ -1,9 +1,9 @@
 # Operation contract and registry
 
-Phases 4 and 5 provide the operation contract, registry/runner, and built-in
-destination adapters/factories. The live webhook uses this pipeline with its
-existing response fields. Phase 6 extracts the remaining HTTP coordination and
-legacy response mapping into dedicated classes.
+Phases 4–6 provide the operation contract, registry/runner, built-in destination
+adapters/factories, and HTTP integration. `WebhookHub` coordinates the request, and
+`ResponseBuilder` formats execution reports with an explicit `LegacyResultMapper`.
+The public entry point has no destination-specific branches.
 Monolog and failure notifications remain later phases.
 
 ## Registration and construction
@@ -103,7 +103,7 @@ successful no-op.
 Results carry `HttpFailure` explicitly: bad input (400), internal failure (500), or
 upstream failure (502). Aggregate classification prioritizes 500, then 502, then
 400. The runner has no email, storage, or Todoist branches. Legacy HTTP response
-mapping remains outside the runner and is added during the HTTP integration phase.
+mapping remains outside the runner in `LegacyResultMapper`.
 
 Run the isolated contract tests with `php tests/operations.php`. They use fake
 operations and no production credentials, network destinations, or real delivery.
@@ -127,10 +127,31 @@ and sanitized stage information.
 `mail-status.txt` only if storage succeeded and email actually executed. SMTP
 acceptance is recorded in both modes, while failure messages are suppressed in
 debug mode. Email has no storage dependency. Filesystem or logger failures in this
-recorder cannot change the delivery results. `webhook.php` currently preserves the
-legacy result fields and error wording; that compatibility mapping moves into a
-response builder in Phase 6.
+recorder cannot change the delivery results. `ResponseBuilder` and `LegacyResultMapper` preserve the
+legacy result fields and error wording, adding a generic `operations` object.
+Unknown operation diagnostics stay scoped to their operation in debug mode.
+Private filesystem outputs and timing are excluded from public results.
 
 Run `php tests/destinations.php` for isolated adapter checks. The HTTP regression
 suite covers all feature combinations, actual local SMTP/API stubs, partial Todoist
 outcomes, shared uploads, and deliberately failing injected service loggers.
+
+## Hub and request correlation
+
+The entry point generates a random request ID before Composer bootstrap. The hub
+uses this trusted ID in `RequestContext`, all response bodies, and `X-Request-Id`.
+Incoming correlation headers never supply the internal ID. `RequestLogger` adds
+the ID to injected PSR-3 log context and isolates logger failures; private error
+logs and early server-log fallbacks include it as well. Debug mode suppresses logs.
+
+The hub loads environment settings once, validates the method and authentication
+before optional destination configuration, creates one typed note with the receipt
+time from request context, completes operation preflight, executes the pipeline,
+records outcomes, and releases hub-owned audio in `finally`. All-disabled requests
+remain successful no-ops. Production errors retain empty bodies, including bootstrap
+errors; debug JSON contains safe messages and the same request ID as the header.
+
+Run `php tests/hub.php` for arbitrary-operation mapping, correlation, configuration
+precedence, debug suppression, and silent response checks. HTTP suites additionally
+verify unique IDs, ignored incoming IDs, correlated private/server logs, empty map
+serialization, every feature combination, and partial/skipped operation statuses.

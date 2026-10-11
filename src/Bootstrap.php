@@ -8,7 +8,9 @@ use Pebble\Config\WebhookConfig;
 use Pebble\Operation\Builtin\{LocalStorageFactory, EmailFactory, TodoistFactory};
 use Pebble\Operation\{OperationDependencies, OperationRegistry, OperationRunner, OutcomeRecorder, RequestContext};
 use Pebble\Services\SmtpDiagnostics;
+use Pebble\Services\RequestLogger;
 use Psr\Log\NullLogger;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\Dotenv\Dotenv;
 
 final class Bootstrap
@@ -18,6 +20,7 @@ final class Bootstrap
     public function __construct(
         private readonly string $projectDirectory,
         private readonly ?Closure $todoistClientFactory = null,
+        private readonly ?LoggerInterface $logger = null,
     ) {
     }
 
@@ -52,9 +55,20 @@ final class Bootstrap
         return \Pebble\Operation\OperationRegistry::fromConfiguration($definitions, $settings, $factories, $dependencies);
     }
 
+    public function createHub(\Pebble\Http\ErrorResponder $errors, string $requestId): WebhookHub
+    {
+        return new WebhookHub($this, $errors, $this->projectDirectory, $requestId);
+    }
+
+    public function dependencies(RequestContext $context): OperationDependencies
+    {
+        return new OperationDependencies(new RequestLogger(
+            $context->debugMode ? new NullLogger() : ($this->logger ?? new NullLogger()), $context->requestId), $context);
+    }
+
     public function assemble(WebhookConfig $config, ?OperationDependencies $dependencies = null): BootstrappedServices
     {
-        $dependencies ??= new OperationDependencies(new NullLogger(), new RequestContext(
+        $dependencies ??= $this->dependencies(new RequestContext(
             bin2hex(random_bytes(16)), new \DateTimeImmutable('now', $config->timezone), $config->debugMode));
         // Do not reload Dotenv. Direct callers may supply a typed config without loading .env.
         $secrets = ['WEBHOOK_TOKEN' => $config->webhookToken, 'TODOIST_API_TOKEN' => $config->todoistApiToken];

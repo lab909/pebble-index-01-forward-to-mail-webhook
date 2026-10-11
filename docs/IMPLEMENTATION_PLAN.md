@@ -301,24 +301,46 @@ All tests use temporary settings/files and local stubs without production creden
 
 ## Phase 6 — thin entry point and stable HTTP responses
 
-- [ ] Implement `WebhookHub` to coordinate validation, note preparation, enabled
+- [x] Implement `WebhookHub` to coordinate validation, note preparation, enabled
       operation preflight, execution, and aggregate results.
-- [ ] Move legacy result mapping into a response builder: preserve `saved`,
+- [x] Move legacy result mapping into a response builder: preserve `saved`,
       `emailSent`, `todoistSaved`, `folder`, and Todoist IDs for existing clients.
-- [ ] Add an `operations` result map for new integrations without introducing new
+- [x] Add an `operations` result map for new integrations without introducing new
       destination branches in the entry point. Keep existing top-level fields
       through an explicit compatibility mapper.
-- [ ] Preserve silent error bodies in production and sanitized debug JSON.
-- [ ] Include an internally generated request ID in responses/headers and logs;
+- [x] Preserve silent error bodies in production and sanitized debug JSON.
+- [x] Include an internally generated request ID in responses/headers and logs;
       do not trust an incoming correlation header as the internal identifier.
-- [ ] Reduce `webhook.php` to bootstrap, request capture, one hub call, response
+- [x] Reduce `webhook.php` to bootstrap, request capture, one hub call, response
       formatting/sending, and minimal bootstrap failure handling.
-- [ ] Keep default PHP warning/error display disabled in both modes so raw warnings
+- [x] Keep default PHP warning/error display disabled in both modes so raw warnings
       cannot corrupt JSON or leak credentials.
-- [ ] Ensure operations depend on typed input rather than PHP request globals.
+- [x] Ensure operations depend on typed input rather than PHP request globals.
 
 **Done when:** no destination switch, API call, or destination error branch remains
 in `webhook.php`.
+
+**Completed 2026-10-11 on PHP 8.2.33.** `WebhookHub` now coordinates the HTTP
+boundary and operation pipeline. `ResponseBuilder` handles generic operation maps,
+while `LegacyResultMapper` preserves existing destination fields and error wording.
+The 30-line public entry point performs bootstrap, captures one request, calls the
+hub once, and sends its response; no destination branches remain there.
+
+Every response has an internally generated `X-Request-Id`; JSON bodies contain the
+same `requestId`. Incoming correlation headers are ignored. Private and fallback
+error logs include the ID, and injected PSR-3 logging receives trusted correlation
+context through a failure-isolating `RequestLogger`. Debug mode still suppresses
+logs, and production errors still have empty bodies. Operation report responses
+add an object map with full/partial/skipped/validation outcomes and external IDs,
+without exposing internal storage paths or timing. Empty maps serialize as `{}`.
+
+Validation: hub/response tests cover arbitrary operation IDs, compatibility mapping,
+reserved diagnostic keys, partial progress, internal path exclusion, validation
+classification, request IDs, configuration precedence, and debug/production output.
+HTTP suites verify unique IDs and header/body agreement, reject incoming correlation
+IDs, match failed requests to private/server logs, and preserve all destination
+combinations and partial Todoist behavior. All existing suites, PHP 8.2 syntax,
+Composer/platform, and diff checks pass using temporary fixtures and local stubs.
 
 ## Phase 7 — Monolog structured logging and rotation
 
@@ -524,7 +546,7 @@ and logging/notification failure paths are tested on PHP 8.2.
 
 - [x] **Milestone A:** compatibility baseline, configuration, and typed note
       (phases 1–3).
-- [ ] **Milestone B:** operation registry, migrated destinations, thin entry point
+- [x] **Milestone B:** operation registry, migrated destinations, thin entry point
       (phases 4–6).
 - [ ] **Milestone C:** Monolog events and rotating logs (phase 7).
 - [ ] **Milestone D:** failure notification emails and suppression (phase 8).

@@ -13,7 +13,7 @@ use RuntimeException;
 /** Converts an authenticated, validated HTTP request to destination-independent data. */
 final readonly class NoteFactory
 {
-    public function __construct(private DateTimeZone $timezone)
+    public function __construct(private DateTimeZone $timezone, private ?DateTimeImmutable $receivedAt = null)
     {
     }
 
@@ -38,7 +38,7 @@ final readonly class NoteFactory
         }
         $transcription = $request->post['transcription'] ?? '';
         return new Note(is_string($transcription) ? $transcription : '', $request->post,
-            new DateTimeImmutable('now', $this->timezone),
+            $this->receivedAt?->setTimezone($this->timezone) ?? new DateTimeImmutable('now', $this->timezone),
             (new DateTimeImmutable('@' . intdiv((int) $timestamp, 1000)))->setTimezone($this->timezone),
             $this->timezone, [
                 'Content-Type' => $request->server['CONTENT_TYPE'] ?? null,

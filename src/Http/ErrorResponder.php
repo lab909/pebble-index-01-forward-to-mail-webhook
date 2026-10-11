@@ -10,7 +10,7 @@ final class ErrorResponder
     private ?FileLogger $logger = null;
     private bool $phpErrorLog = false;
 
-    public function __construct(private string $logPath, private bool $debugMode = false)
+    public function __construct(private string $logPath, private bool $debugMode = false, private ?string $requestId = null)
     {
         $this->setDebugMode($debugMode);
     }
@@ -40,7 +40,10 @@ final class ErrorResponder
 
     public function send(Response $response): void
     {
-        if (!$this->debugMode) {
+        if ($this->requestId !== null) {
+            $response = $response->withRequestId($this->requestId);
+        }
+        if ($response->status >= 400 && !$this->debugMode) {
             if ($this->phpErrorLog) {
                 error_log('Pebble webhook: HTTP ' . $response->status . ': '
                     . json_encode($response->body, JSON_UNESCAPED_SLASHES));

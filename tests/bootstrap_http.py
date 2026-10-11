@@ -1,6 +1,7 @@
 """Exercise early bootstrap failures against disposable projects, without external calls."""
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import socket
@@ -41,13 +42,24 @@ with tempfile.TemporaryDirectory(prefix='pebble-bootstrap-') as temporary:
                     time.sleep(0.02)
             else:
                 raise RuntimeError('PHP test server did not start')
+            ids = set()
+            error_ids = []
             def request(name='normal', post=True):
-                arguments = ['curl', '-sS', '--max-time', '10', '-w', '\n%{http_code}',
+                arguments = ['curl', '-sS', '--max-time', '10', '--dump-header', str(root / 'headers.txt'), '-H', 'X-Request-Id: forged-id', '-w', '\n%{http_code}',
                              f'http://127.0.0.1:{port}/{name}/public/webhook.php']
                 if post:
                     arguments += ['-H', 'Authorization: Bearer test-token', '-F', 'transcription=Test']
                 result = subprocess.run(arguments, check=True, capture_output=True, text=True)
                 body, status = result.stdout.rsplit('\n', 1)
+                request_id = re.search(r'^x-request-id: ([0-9a-f]{32})$', (root / 'headers.txt').read_text().lower(), re.MULTILINE)
+                assert request_id
+                request_id = request_id.group(1)
+                assert request_id not in ids
+                ids.add(request_id)
+                if body:
+                    assert json.loads(body)['requestId'] == request_id
+                else:
+                    error_ids.append(request_id)
                 return body, int(status)
 
             configure("LOG_DIRECTORY=private/logs\nLOG_FILENAME=errors.log\n")
@@ -78,6 +90,7 @@ with tempfile.TemporaryDirectory(prefix='pebble-bootstrap-') as temporary:
             assert not (root / 'missing-vendor/logs').exists()
             assert not (project / 'logs').exists()
             server_log = (root / 'server.log').read_text()
+            assert all(request_id in server_log + custom_log.read_text() for request_id in error_ids)
             assert 'Pebble webhook: HTTP 500:' in server_log and 'unterminated-secret-value' not in server_log
             print('Bootstrap HTTP checks passed: custom private logs, unsafe settings, debug suppression, malformed/missing .env, and missing Composer dependencies.')
         finally:

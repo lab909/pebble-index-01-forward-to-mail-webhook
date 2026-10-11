@@ -13,6 +13,12 @@ final readonly class Response
     ) {
     }
 
+    public function withRequestId(string $requestId): self
+    {
+        return new self($this->status, array_replace($this->body, ['requestId' => $requestId]),
+            array_replace($this->headers, ['X-Request-Id' => $requestId]));
+    }
+
     public function send(bool $showErrors = false): void
     {
         http_response_code($this->status);

@@ -28,14 +28,14 @@ processing before forwarding. The hub currently has no queue or automatic retry.
 
 See the [implementation plan](docs/IMPLEMENTATION_PLAN.md) for the planned
 package-based extensions, Monolog log rotation, and failure notification emails.
-Its checkboxes track implementation progress. Phases 1–5 are complete; the
+Its checkboxes track implementation progress. Phases 1–6 are complete; the
 [compatibility baseline](docs/COMPATIBILITY_BASELINE.md) records current behavior
 and the regression checks that later refactoring must preserve.
 
 The live webhook now runs storage, email, and Todoist through the operation
-registry and their adapters/factories. Phase 6 moves the remaining HTTP coordination
-and legacy response mapping into the hub and response builder. Monolog, failure
-notification emails, and package examples remain later-phase work.
+registry and their adapters/factories. `WebhookHub` coordinates requests, while the
+response builder preserves legacy fields and adds per-operation results. Monolog,
+failure notification emails, and package examples remain later-phase work.
 
 ## Requirements
 
@@ -78,7 +78,9 @@ The web server's PHP user needs write access to the project directory to create
 `public/` is the document root. Application code lives alongside it in `src/`,
 autoloaded by Composer under the `Pebble\` namespace:
 
-- `public/webhook.php`: loads configuration and coordinates validation, storage, email, and Todoist.
+- `public/webhook.php`: captures the request, bootstraps the hub, and sends its response with minimal fallback handling.
+- `src/WebhookHub.php`: coordinates authentication, configuration, typed note preparation, preflight, execution, outcome recording, and cleanup.
+- `src/Http/ResponseBuilder.php` and `LegacyResultMapper.php`: format generic operation results and preserve existing response fields.
 - `config/operations.php`: declares destination IDs, switches, order, and failure policy for the operation pipeline.
 - `src/Operation/`: operation contracts, lazy registry, typed results, and destination-independent runner; see the [operation contract](docs/OPERATIONS.md).
 - `src/Bootstrap.php`: loads the environment once and constructs enabled services without executing them.
@@ -224,6 +226,38 @@ explicitly marked as hub-owned temporary files, using `finally`; durable files s
 with their owner. There is no queue in this phase. Future queued operations must
 first persist audio durably and must never enqueue a temporary upload path.
 
+## Responses and request correlation
+
+Existing success fields remain: `ok`, `saved`, `emailSent`, `todoistSaved`, optional
+`folder`, and Todoist project/task IDs. Responses now add `requestId` and an
+`operations` object whenever the operation pipeline produces a report. Disabled
+operations are omitted; with all destinations disabled, `operations` is `{}`.
+Operation statuses are `success`, `failure`, `partial`, `skipped`, or
+`validation_failed`. Results retain external IDs and partial progress. Debug failure
+results include sanitized diagnostics. Private output paths and execution timing
+are excluded from the public map.
+
+For example, a successful request with all destinations disabled returns:
+
+```json
+{
+  "ok": true,
+  "saved": false,
+  "emailSent": false,
+  "todoistSaved": false,
+  "operations": {},
+  "requestId": "0123456789abcdef0123456789abcdef"
+}
+```
+
+Every webhook response includes `X-Request-Id`, generated internally for that
+request. JSON bodies include the same value as `requestId`. Incoming request or
+correlation ID headers are ignored. Production error bodies remain empty; use the
+response header to find the matching request in the private log or early PHP server
+log. Early HTTP/configuration errors have no operation report, so their debug body
+contains `error` and `requestId`. The existing HTTP status codes and legacy SMTP/
+Todoist diagnostic fields are preserved.
+
 ## Error logging
 
 With `DEBUG_MODE=false` (the default), webhook errors return only the HTTP status
@@ -259,12 +293,13 @@ cannot be written, messages fall back to the server's PHP error log.
 First check the syntax:
 
 ```bash
-find src public tests -name '*.php' -exec php -l {} \;
+find src public config tests -name '*.php' -exec php -l {} \;
 php tests/run.php
 php tests/config.php
 php tests/note.php
 php tests/operations.php
 php tests/destinations.php
+php tests/hub.php
 python3 tests/http.py
 python3 tests/bootstrap_http.py
 ```

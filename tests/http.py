@@ -28,7 +28,7 @@ FEATURE_COMBINATIONS = [
 
 
 def assert_success(body, flags):
-    expected_keys = {'ok', 'saved', 'emailSent', 'todoistSaved'}
+    expected_keys = {'ok', 'saved', 'emailSent', 'todoistSaved', 'operations', 'requestId'}
     if flags['saved']:
         expected_keys.add('folder')
         assert re.fullmatch(r'\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{3}_[0-9a-f]{6}', body['folder']), body
@@ -36,6 +36,9 @@ def assert_success(body, flags):
         expected_keys.update(['todoistProjectId', 'todoistTaskId'])
     assert set(body) == expected_keys, body
     assert body['ok'] is True and all(body[name] is value for name, value in flags.items()), body
+    expected_operations = {id for field, id in [('saved', 'local_storage'), ('emailSent', 'email'), ('todoistSaved', 'todoist')] if flags[field]}
+    assert set(body['operations']) == expected_operations
+    assert all(result['status'] == 'success' for result in body['operations'].values())
 
 
 def assert_info(info, audio_size):
@@ -97,23 +100,22 @@ with tempfile.TemporaryDirectory(prefix='pebble-http-') as directory:
     (project / 'public').mkdir()
     todoist = TodoistStub()
     threading.Thread(target=todoist.server.serve_forever, daemon=True).start()
-    # Inject the local API client through Bootstrap; production has no endpoint override.
+    # Inject local clients and a failing service logger; production has no endpoint override.
     endpoint = (ROOT / 'public/webhook.php').read_text().replace(
         '$bootstrap = new Bootstrap($projectDirectory);',
+        'require $projectDirectory . "/hub-probe.php"; '
         '$bootstrap = new Bootstrap($projectDirectory, '
         'static fn (\\Pebble\\Config\\TodoistConfig $config): \\Pebble\\Services\\TodoistClient '
-        f'=> new \\Pebble\\Services\\TodoistClient($config->apiToken, "{todoist.url}"));')
-    # All live service logging must be harmless even when the injected logger is broken.
-    endpoint = endpoint.replace('$services = $bootstrap->assemble($config);',
-        '$services = $bootstrap->assemble($config, new \\Pebble\\Operation\\OperationDependencies('
+        f'=> new \\Pebble\\Services\\TodoistClient($config->apiToken, "{todoist.url}"), '
         'new class extends \\Psr\\Log\\AbstractLogger {'
         'public function log($level, string|\\Stringable $message, array $context = []): void {'
-        'throw new \\RuntimeException("Simulated logger failure"); } }, '
-        'new \\Pebble\\Operation\\RequestContext("http-test", new \\DateTimeImmutable(), $config->debugMode)));')
-    # Verify the runner leaves PHP-owned input readable after every destination finishes.
-    endpoint = endpoint.replace('$services->outcomeRecorder->record($report, $config->debugMode);',
-        '$services->outcomeRecorder->record($report, $config->debugMode); '
-        'if ($note?->audio !== null) { '
+        'throw new \\RuntimeException("Simulated logger failure"); } });')
+    # Instrument a disposable hub copy to assert actual PHP upload lifetime after execution.
+    hub_source = (ROOT / 'src/WebhookHub.php').read_text()
+    probe_target = '$services->outcomeRecorder->record($report, $config->debugMode);'
+    assert probe_target in hub_source
+    hub_source = hub_source.replace(probe_target,
+        probe_target + ' if ($note?->audio !== null) { '
         '$note->audio->cleanup(); '
         'if ($note->audio->ownership !== \\Pebble\\Note\\AssetOwnership::PhpUpload '
         '|| !is_uploaded_file($note->audio->path)) { '
@@ -121,6 +123,7 @@ with tempfile.TemporaryDirectory(prefix='pebble-http-') as directory:
         '$path = $report->entries["local_storage"]->result->outputs["audioPath"] ?? null; '
         'if ($path !== null && file_get_contents($note->audio->path) !== file_get_contents($path)) { '
         'throw new \\RuntimeException("Shared PHP upload was modified."); } }')
+    (project / 'hub-probe.php').write_text(hub_source)
     (project / 'public/webhook.php').write_text(endpoint)
     (project / 'src').symlink_to(ROOT / 'src', target_is_directory=True)
     (project / 'config').symlink_to(ROOT / 'config', target_is_directory=True)
@@ -172,21 +175,33 @@ with tempfile.TemporaryDirectory(prefix='pebble-http-') as directory:
                                   MAIL_TO='recipient@example.com', MAIL_SUBJECT_PREFIX='Pebble test')
                 (project / '.env').write_text(''.join(f"{key}='{value}'\n" for key, value in values.items()))
 
+            request_ids = set()
+            production_error_ids = []
+
             def request(args, debug=False):
                 header_file = project / 'response-headers.txt'
-                result = subprocess.run(['curl', '-sS', '--max-time', '10', '--dump-header', str(header_file), '-w', '\n%{http_code}', url] + args,
+                result = subprocess.run(['curl', '-sS', '--max-time', '10', '--dump-header', str(header_file), '-w', '\n%{http_code}', url, '-H', 'X-Request-Id: forged-id', '-H', 'X-Correlation-Id: forged-id'] + args,
                                         capture_output=True, text=True, check=True)
                 body, status = result.stdout.rsplit('\n', 1)
                 status = int(status)
                 headers = header_file.read_text().lower()
+                request_id = re.search(r'^x-request-id: ([0-9a-f]{32})$', headers, re.MULTILINE)
+                assert request_id, headers
+                request_id = request_id.group(1)
+                assert request_id not in request_ids and request_id != 'forged-id'
+                request_ids.add(request_id)
                 if status == 405:
                     assert 'allow: post' in headers
                 if status < 400 or debug:
                     assert 'content-type: application/json; charset=utf-8' in headers
                 if status >= 400 and not debug:
                     assert body == '', (status, body)
+                    production_error_ids.append(request_id)
                     return None, status
-                return json.loads(body), status
+                parsed = json.loads(body)
+                assert parsed['requestId'] == request_id
+                assert str(project) not in body, 'Internal output paths must not be public'
+                return parsed, status
 
             def upload(debug=False):
                 return request(['-H', 'Authorization: Bearer local-test-token', '-F',
@@ -259,6 +274,8 @@ with tempfile.TemporaryDirectory(prefix='pebble-http-') as directory:
             (project / '.env').unlink()
             assert upload()[1] == 500
             private_log = (project / 'logs/webhook.log').read_text()
+            assert all(request_id in private_log + (project / 'server.log').read_text() for request_id in production_error_ids)
+            assert 'forged-id' not in private_log
             for status in [400, 401, 405, 415, 500, 502]:
                 assert f'HTTP {status}:' in private_log
             assert 'local-test-token' not in private_log and 'wrong-secret' not in private_log
@@ -392,7 +409,9 @@ echo json_encode($service->save($note));
                 body, status = upload(debug=debug)
                 assert status == 500
                 if debug:
-                    assert set(body) == {'error'} and 'permissions' in body['error']
+                    assert set(body) == {'error', 'operations', 'requestId'} and 'permissions' in body['error']
+                    assert body['operations']['local_storage']['status'] == 'failure'
+                    assert body['operations']['email']['status'] == body['operations']['todoist']['status'] == 'skipped'
             assert len(messages) == before_messages and len(todoist.requests) == before_api
             assert list((project / 'recordings').iterdir()) == recordings_before
 
@@ -407,6 +426,7 @@ echo json_encode($service->save($note));
             body, status = request(['-H', 'Authorization: Bearer local-test-token', '-F', 'recordedAt=1'], debug=True)
             assert status == 400 and 'transcription' in body['error']
             assert len(todoist.requests) == requests_before
+            assert body['operations']['todoist']['status'] == 'validation_failed'
 
             # Partial failures expose the created task and stage in debug mode, without the token.
             for failed_stage, expected_stage in [('audio.m4a', 'audio upload'), ('info.txt', 'info.txt upload'),
@@ -426,6 +446,9 @@ echo json_encode($service->save($note));
                 assert len(todoist.comments) == comments_before + completed
                 assert all(comment['task_id'] == body['todoistTaskId'] for comment in todoist.comments[comments_before:])
                 assert body['todoistDebug']['stage'] == expected_stage, body
+                operation = body['operations']['todoist']
+                assert operation['status'] == 'partial' and operation['externalIds']['taskId'] == body['todoistTaskId']
+                assert operation['progress']['commentsCreated'] == completed
                 assert TODOIST_TOKEN not in json.dumps(body) and '[redacted]' in body['todoistDebug']['message']
                 assert (project / 'logs/webhook.log').read_bytes() == before_log
                 assert (project / 'recordings' / body['folder'] / 'audio.m4a').exists()
