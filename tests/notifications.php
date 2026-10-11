@@ -133,6 +133,16 @@ try {
     $count = count($mailer->emails);
     for ($i = 0; $i < 2; ++$i) { $notifier = $make(settings: $zero); $notifier->report($report()); $notifier->finalize(); }
     check(count($mailer->emails) === $count + 2, 'Zero success cooldown permits repeated sends');
+    $generic = AlertConfig::fromEnvironment(new Environment($root, array_replace($values, ['FAILURE_EMAIL_STATE_DIRECTORY' => 'generic-stage'])));
+    $count = count($mailer->emails);
+    foreach (['create', 'create', 'acknowledge'] as $stage) {
+        $result = OperationResult::failure(ErrorCategory::Storage, HttpFailure::InternalServerError,
+            'Extension step failed.', diagnostics: ['stage' => $stage]);
+        $notifier = $make(settings: $generic);
+        $notifier->report(new ExecutionReport([], ['extension' => new ExecutionEntry('extension', $now, 1, $result)], []));
+        $notifier->finalize();
+    }
+    check(count($mailer->emails) === $count + 2, 'Generic extension stages have independent cooldown fingerprints');
     echo "Notification checks passed: aggregation, sanitization, partial results, fingerprint/cooldown persistence, concurrency, retry window, settings independence, severity, debug policy, safe configuration failure.\n";
 } finally {
     $_ENV = $originalEnv; $_SERVER = $originalServer;

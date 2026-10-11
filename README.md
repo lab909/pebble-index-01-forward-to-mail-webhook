@@ -24,11 +24,15 @@ attempted independently, so a failure in one does not prevent the other from
 running. Request validation, configuration, and local storage failures stop
 processing before forwarding. The hub currently has no queue or automatic retry.
 
+Additional destinations can be installed as Composer libraries and registered
+explicitly. The optional [local receipt example](docs/EXTENSIONS.md) stays disabled
+until installed, registered, and enabled.
+
 ## Development roadmap
 
 See the [implementation plan](docs/IMPLEMENTATION_PLAN.md) for the planned
 package-based extensions, Monolog log rotation, and failure notification emails.
-Its checkboxes track implementation progress. Phases 1–8 are complete; the
+Its checkboxes track implementation progress. Phases 1–9 are complete; the
 [compatibility baseline](docs/COMPATIBILITY_BASELINE.md) records current behavior
 and the regression checks that later refactoring must preserve.
 
@@ -36,7 +40,8 @@ The live webhook now runs storage, email, and Todoist through the operation
 registry and their adapters/factories. `WebhookHub` coordinates requests, while the
 response builder preserves legacy fields and adds per-operation results. Monolog
 records structured lifecycle events with rotation and retention. Optional failure notification emails use separate SMTP settings and persistent
-cooldown state. Package examples remain later-phase work.
+cooldown state. A [Composer package example](docs/EXTENSIONS.md) demonstrates adding
+operations through configuration; deployment verification remains Phase 10.
 
 ## Requirements
 
@@ -83,6 +88,8 @@ autoloaded by Composer under the `Pebble\` namespace:
 - `src/WebhookHub.php`: coordinates authentication, configuration, typed note preparation, preflight, execution, outcome recording, and cleanup.
 - `src/Http/ResponseBuilder.php` and `LegacyResultMapper.php`: format generic operation results and preserve existing response fields.
 - `config/operations.php`: declares destination IDs, switches, order, and failure policy for the operation pipeline.
+- `config/operation-factories.php`: supplies lazy package factory bindings without editing orchestration.
+- `examples/receipt-operation/`: optional Composer library demonstrating validation, success, failure, and partial results.
 - `src/Operation/`: operation contracts, lazy registry, typed results, and destination-independent runner; see the [operation contract](docs/OPERATIONS.md).
 - `src/Bootstrap.php`: loads the environment once and constructs enabled services without executing them.
 - `src/Config/`: separate core, storage, email, Todoist, and logging settings with shared validation; `WebhookConfig` aggregates them. `AlertConfig` validates independent operator notification settings.
@@ -328,6 +335,7 @@ python3 tests/http.py
 python3 tests/bootstrap_http.py
 python3 tests/logging_http.py
 python3 tests/notifications_http.py
+PHP_BINARY=php8.2 python3 tests/extensions.py
 ```
 
 Then use Pebble or a multipart request such as this (use your actual token,

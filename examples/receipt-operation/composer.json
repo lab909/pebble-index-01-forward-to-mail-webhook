@@ -1,0 +1,14 @@
+{
+    "name": "pebble-example/receipt-operation",
+    "description": "Local receipt operation example for the Pebble Index 01 Webhook Hub",
+    "type": "library",
+    "version": "0.1.0",
+    "require": {
+        "php": ">=8.2"
+    },
+    "autoload": {
+        "psr-4": {
+            "PebbleExample\\Receipt\\": "src/"
+        }
+    }
+}

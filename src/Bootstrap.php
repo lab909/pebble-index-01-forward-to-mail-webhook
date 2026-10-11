@@ -59,6 +59,31 @@ final class Bootstrap
             'FORWARD_TO_MAIL' => $config->forwardToMail,
             'SAVE_TO_TODOIST' => $config->saveToTodoist,
         ]);
+        // Additional switches come from the same cached snapshot as core settings.
+        // Direct typed-config callers still need no .env file.
+        $environment = new Environment($this->projectDirectory, $this->environment ?? []);
+        foreach ($definitions as $row) {
+            if (is_array($row) && is_string($row['enabled'] ?? null)
+                && !array_key_exists($row['enabled'], $settings)) {
+                $settings[$row['enabled']] = $environment->boolean($row['enabled'], false);
+            }
+        }
+        $extensionFile = $this->projectDirectory . '/config/operation-factories.php';
+        if (is_file($extensionFile)) {
+            try {
+                $provider = require $extensionFile;
+                if (!$provider instanceof Closure) {
+                    throw new \Pebble\Config\ConfigurationException('Invalid extension factory provider.');
+                }
+                $extensions = $provider($environment);
+                if (!is_array($extensions) || array_intersect_key($extensions, $factories) !== []) {
+                    throw new \Pebble\Config\ConfigurationException('Invalid or conflicting extension factory bindings.');
+                }
+                $factories = array_replace($factories, $extensions);
+            } catch (\Throwable $exception) {
+                throw new \Pebble\Config\ConfigurationException('Invalid extension factory configuration.', 0, $exception);
+            }
+        }
         return \Pebble\Operation\OperationRegistry::fromConfiguration($definitions, $settings, $factories, $dependencies);
     }
 

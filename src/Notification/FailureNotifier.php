@@ -69,7 +69,8 @@ final class FailureNotifier
         $fingerprints = [];
         foreach ($failures as $failure) {
             // IDs, messages, dates, paths, and provider prose are intentionally excluded.
-            $stage = $failure['progress']['stage'] ?? $failure['diagnostics']['todoistDebug']['stage'] ?? '';
+            $stage = $failure['progress']['stage'] ?? $failure['diagnostics']['stage']
+                ?? $failure['diagnostics']['todoistDebug']['stage'] ?? '';
             $fingerprints[] = hash('sha256', json_encode([$failure['operationId'], $stage,
                 $failure['providerStatus'] ?? null, $failure['errorCategory']], JSON_THROW_ON_ERROR));
         }

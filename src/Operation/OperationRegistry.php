@@ -64,7 +64,9 @@ final readonly class OperationRegistry
         // Resolve every enabled binding before create(); disabled class names are never autoloaded.
         $resolved = [];
         foreach ($enabled as $definition) {
-            $binding = $factories[$definition->factory] ?? null;
+            // A fully qualified class named explicitly in the catalogue is also
+            // a binding. Only enabled rows reach this autoload/constructor path.
+            $binding = $factories[$definition->factory] ?? (str_contains($definition->factory, '\\') ? $definition->factory : null);
             try {
                 if (is_string($binding)) {
                     if (!is_subclass_of($binding, OperationFactoryInterface::class)) {

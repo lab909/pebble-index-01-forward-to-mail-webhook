@@ -15,8 +15,8 @@ do not send operator alerts. See [notification policy](NOTIFICATIONS.md).
 | Field | Meaning |
 | --- | --- |
 | `id` | Unique stable identifier, such as `local_storage`. |
-| `enabled` | Name of an already parsed boolean setting. Missing settings disable operations. |
-| `factory` | Binding ID supplied by bootstrap, rather than automatic package discovery. |
+| `enabled` | Boolean environment setting parsed by bootstrap; missing extension switches disable operations. |
+| `factory` | Explicit binding ID or fully qualified no-argument factory class. |
 | `order` | Nonnegative integer; ascending execution order, with ID as a deterministic tie breaker. |
 | `failure` | `abort` stops later operations; `continue` allows independent delivery. |
 
@@ -25,14 +25,19 @@ Todoist next (`continue`). Extension registration must be deliberate. Composer
 installation alone never enables or executes a package.
 
 `Bootstrap::prepareOperations()` loads this catalogue and supplies the existing
-feature switches. Additional parsed switches may be passed explicitly; they cannot
-override the built-in switches. Custom callers may use
+feature switches. Extension switches are parsed from the same cached environment
+snapshot; optional parsed switches may also be passed explicitly. They cannot
+override the built-in switches. `config/operation-factories.php` supplies lazy
+package bindings and cannot replace existing built-in factory IDs. Missing files
+remain compatible with older installations. See [package setup](EXTENSIONS.md). Custom callers may use
 `OperationRegistry::fromConfiguration()` with their own catalogue and switches.
 
 A factory binding is an `OperationFactoryInterface` instance, a no-argument factory
 class name, or a lazy closure returning a factory. Use lazy providers when parsing
 destination credentials or constructing clients. Disabled providers and factory
 classes are never called or autoloaded, and disabled operations need no bindings.
+Fully qualified factory classes can be named directly in a registry row; their
+constructors must take no arguments and perform no destination work.
 Factory instances supplied by callers are already constructed by those callers.
 
 The registry validates the whole catalogue before loading providers, resolves every
@@ -159,3 +164,12 @@ Run `php tests/hub.php` for arbitrary-operation mapping, correlation, configurat
 precedence, debug suppression, and silent response checks. HTTP suites additionally
 verify unique IDs, ignored incoming IDs, correlated private/server logs, empty map
 serialization, every feature combination, and partial/skipped operation statuses.
+
+## Package example and contract compatibility
+
+[The extension guide](EXTENSIONS.md) includes a real Composer path-package example,
+explicit registration, settings, ownership rules, and contract versioning limits.
+Run `PHP_BINARY=php8.2 python3 tests/extensions.py` to install the example in an
+isolated project and exercise it through the same runner and live hub. The contracts
+currently belong to this application; no standalone contracts package or compatibility
+guarantee across arbitrary hub releases is published.

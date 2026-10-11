@@ -500,23 +500,34 @@ state chosen to distinguish failed attempts from successful sends.
 
 ## Phase 9 — package-based extension example
 
-- [ ] Add a documented minimal example operation and factory, with `.env` switch,
+- [x] Add a documented minimal example operation and factory, with `.env` switch,
       typed configuration, and one explicit registry entry.
-- [ ] Demonstrate validation failure, successful result, partial failure, and
+- [x] Demonstrate validation failure, successful result, partial failure, and
       declared continuation policy using a fake/local operation.
-- [ ] Demonstrate installation as an ordinary Composer library with PSR-4
+- [x] Demonstrate installation as an ordinary Composer library with PSR-4
       autoloading; application operations do not need Composer lifecycle hooks.
-- [ ] Keep registration explicit; do not scan `vendor/` or execute discovered code
+- [x] Keep registration explicit; do not scan `vendor/` or execute discovered code
       automatically.
-- [ ] Ensure registry entries can load factories from external namespaces without
+- [x] Ensure registry entries can load factories from external namespaces without
       requiring changes to the hub or response builder.
-- [ ] Document that extension authors own destination APIs while the hub owns
+- [x] Document that extension authors own destination APIs while the hub owns
       lifecycle timing, HTTP formatting, failure aggregation, and notification policy.
-- [ ] Document PHP compatibility and contract versioning before publishing the
+- [x] Document PHP compatibility and contract versioning before publishing the
       contracts as a separate package.
 
 **Done when:** an example external operation can be installed and registered without
 editing application orchestration.
+
+Completed 2026-10-11 with a private receipt-operation Composer library and
+PSR-4 namespace, typed settings, and opt-in explicit configuration. Bootstrap reads
+additional switches from its cached snapshot and accepts lazy package bindings from
+config/operation-factories.php. Explicit fully qualified no-argument factories are
+also supported. Existing webhook orchestration and generic response mapping needed
+no extension-specific branches. Offline real-Composer installation checks copied
+package autoload, disabled laziness, validation, success/failure/partial, continuation,
+audio ownership, and silent production failures. See [extension setup](EXTENSIONS.md).
+The example remains uninstalled/unregistered by default; contracts are still
+application-owned and deployment remains Phase 10.
 
 ## Phase 10 — verification and migration
 
