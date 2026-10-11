@@ -164,7 +164,7 @@ with tempfile.TemporaryDirectory(prefix='pebble-http-') as directory:
             def configure(store, mail, smtp=smtp_port, debug=False, save_todoist=False):
                 values = {'WEBHOOK_TOKEN': 'local-test-token', 'APP_TIMEZONE': 'UTC',
                           'STORE_TO_FOLDER': str(store).lower(), 'FORWARD_TO_MAIL': str(mail).lower(),
-                          'DEBUG_MODE': str(debug).lower(), 'SAVE_TO_TODOIST': str(save_todoist).lower()}
+                          'DEBUG_MODE': str(debug).lower(), 'SAVE_TO_TODOIST': str(save_todoist).lower(), 'LOG_ROTATION': 'none'}
                 if save_todoist:
                     values.update(TODOIST_API_TOKEN=TODOIST_TOKEN, TODOIST_PARENT_PROJECT='parent-123')
                 if store:
@@ -276,8 +276,9 @@ with tempfile.TemporaryDirectory(prefix='pebble-http-') as directory:
             private_log = (project / 'logs/webhook.log').read_text()
             assert all(request_id in private_log + (project / 'server.log').read_text() for request_id in production_error_ids)
             assert 'forged-id' not in private_log
+            records = [json.loads(line) for line in private_log.splitlines()]
             for status in [400, 401, 405, 415, 500, 502]:
-                assert f'HTTP {status}:' in private_log
+                assert any(record['context'].get('httpStatus') == status for record in records)
             assert 'local-test-token' not in private_log and 'wrong-secret' not in private_log
             assert 'Use POST.' in private_log and 'Invalid authorization.' in private_log
             assert (project / 'logs/webhook.log').stat().st_mode & 0o777 == 0o600
@@ -473,6 +474,9 @@ echo json_encode($service->save($note));
             private_log = (project / 'logs/webhook.log').read_text()
             assert 'Todoist' in private_log and TODOIST_TOKEN not in private_log
             assert todoist.tasks[-1]['id'] in private_log and 'info.txt upload' in private_log
+            failures = [json.loads(line) for line in private_log.splitlines() if json.loads(line)['context'].get('event') == 'operation_failed' and json.loads(line)['context'].get('operationId') == 'todoist']
+            assert failures[-1]['context']['providerStatus'] == 403
+            assert failures[-1]['context']['externalIds']['taskId'] == todoist.tasks[-1]['id']
             todoist.fail = None
 
             # Disabled mode doesn't require Todoist credentials; enabled mode does.

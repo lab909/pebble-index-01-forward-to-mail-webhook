@@ -17,7 +17,7 @@ final readonly class TodoistFactory implements OperationFactoryInterface
 
     public function create(OperationDependencies $dependencies): OperationInterface
     {
-        $logger = $dependencies->requestContext->debugMode ? new NullLogger() : $dependencies->logger;
+        $logger = $dependencies->requestContext->debugMode && !$dependencies->logInDebug ? new NullLogger() : ($dependencies->serviceLogger ?? $dependencies->logger);
         $client = $this->clientFactory === null ? new TodoistClient($this->config->apiToken, logger: $logger) : ($this->clientFactory)($this->config);
         return new TodoistOperation(new TodoistService($client, $this->config->parentProjectId, $this->timezone, $logger), $this->diagnostics);
     }

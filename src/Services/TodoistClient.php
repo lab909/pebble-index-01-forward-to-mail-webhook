@@ -71,7 +71,7 @@ final readonly class TodoistClient
             }
             if ($status < 200 || $status >= 300) {
                 throw new TodoistException($this->redact(sprintf('Todoist %s %s returned HTTP %d: %s',
-                    $method, strtok($path, '?'), $status, $response)));
+                    $method, strtok($path, '?'), $status, $response)), ['providerStatus' => $status]);
             }
             try {
                 $data = json_decode($response, true, flags: JSON_THROW_ON_ERROR);

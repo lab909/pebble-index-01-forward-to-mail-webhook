@@ -9,6 +9,8 @@ final readonly class OperationDependencies
     public function __construct(
         public \Psr\Log\LoggerInterface $logger,
         public RequestContext $requestContext,
+        public bool $logInDebug = false,
+        public ?\Psr\Log\LoggerInterface $serviceLogger = null,
     ) {
     }
 }

@@ -9,6 +9,8 @@ use Pebble\Operation\Builtin\{LocalStorageFactory, EmailFactory, TodoistFactory}
 use Pebble\Operation\{OperationDependencies, OperationRegistry, OperationRunner, OutcomeRecorder, RequestContext};
 use Pebble\Services\SmtpDiagnostics;
 use Pebble\Services\RequestLogger;
+use Pebble\Logging\{LoggerFactory, Redactor, RuntimeErrorBridge};
+use Pebble\Config\{Environment, LoggingConfig};
 use Psr\Log\NullLogger;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Dotenv\Dotenv;
@@ -16,6 +18,9 @@ use Symfony\Component\Dotenv\Dotenv;
 final class Bootstrap
 {
     private ?array $environment = null;
+    private ?LoggerFactory $loggers = null;
+    private ?LoggingConfig $logging = null;
+    private ?Redactor $redactor = null;
 
     public function __construct(
         private readonly string $projectDirectory,
@@ -60,10 +65,50 @@ final class Bootstrap
         return new WebhookHub($this, $errors, $this->projectDirectory, $requestId);
     }
 
+    public function configureLogging(array $values, \Pebble\Http\ErrorResponder $errors, string $requestId): void
+    {
+        $environment = new Environment($this->projectDirectory, $values);
+        $logging = LoggingConfig::fromEnvironment($environment);
+        $debugMode = WebhookConfig::debugModeFromEnvironment($values);
+        try {
+            $timezone = new \DateTimeZone($environment->string('APP_TIMEZONE', 'UTC'));
+        } catch (\Throwable) {
+            // Core configuration still validates timezone after authentication.
+            $timezone = new \DateTimeZone('UTC');
+        }
+        $this->logging = $logging;
+        $this->redactor = new Redactor($values, $requestId);
+        $this->loggers = new LoggerFactory($logging, $timezone, $this->redactor, $debugMode);
+        $logger = $this->hubLogger($requestId);
+        $errors->configureLogging($logger, $logging->allows($debugMode));
+        if (PHP_SAPI !== 'cli') {
+            RuntimeErrorBridge::install($logger, $errors);
+        }
+    }
+
+    public function hasLogging(): bool
+    {
+        return $this->logging !== null;
+    }
+
+    public function hubLogger(string $requestId): LoggerInterface
+    {
+        return new RequestLogger($this->loggers?->create('hub') ?? new NullLogger(), $requestId);
+    }
+
+    public function protectNote(\Pebble\Note\Note $note): void
+    {
+        $this->redactor?->protectNote($note);
+    }
+
     public function dependencies(RequestContext $context): OperationDependencies
     {
-        return new OperationDependencies(new RequestLogger(
-            $context->debugMode ? new NullLogger() : ($this->logger ?? new NullLogger()), $context->requestId), $context);
+        $inDebug = $this->logging?->inDebug ?? false;
+        $allowed = $this->logging === null ? !$context->debugMode : $this->logging->allows($context->debugMode);
+        $logger = !$allowed ? new NullLogger() : ($this->loggers?->create('operations') ?? $this->logger ?? new NullLogger());
+        $services = !$allowed ? new NullLogger() : ($this->logger ?? $logger);
+        return new OperationDependencies(new RequestLogger($logger, $context->requestId), $context, $inDebug,
+            new RequestLogger($services, $context->requestId));
     }
 
     public function assemble(WebhookConfig $config, ?OperationDependencies $dependencies = null): BootstrappedServices
@@ -83,7 +128,7 @@ final class Bootstrap
             'email' => fn () => new EmailFactory($config->email, $diagnostics),
             'todoist' => fn () => new TodoistFactory($config->todoist, $config->timezone, $diagnostics, $this->todoistClientFactory),
         ], $dependencies);
-        return new BootstrappedServices($config, $registry, new OperationRunner($registry),
+        return new BootstrappedServices($config, $registry, new OperationRunner($registry, $dependencies->logger),
             new OutcomeRecorder($dependencies->logger));
     }
 }

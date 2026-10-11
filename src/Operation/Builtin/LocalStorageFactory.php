@@ -16,6 +16,6 @@ final readonly class LocalStorageFactory implements OperationFactoryInterface
     public function create(OperationDependencies $dependencies): OperationInterface
     {
         return new LocalStorageOperation(new RecordingStorage($this->config->directory, $this->timezone,
-            $dependencies->requestContext->debugMode ? new NullLogger() : $dependencies->logger));
+            $dependencies->requestContext->debugMode && !$dependencies->logInDebug ? new NullLogger() : ($dependencies->serviceLogger ?? $dependencies->logger)));
     }
 }

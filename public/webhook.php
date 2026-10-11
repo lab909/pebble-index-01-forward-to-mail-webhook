@@ -7,7 +7,6 @@ use Pebble\Http\{ErrorResponder, Request, Response};
 $projectDirectory = dirname(__DIR__);
 $requestId = bin2hex(random_bytes(16));
 // Minimal handling remains available when Composer cannot be loaded.
-require_once $projectDirectory . '/src/Services/FileLogger.php';
 require_once $projectDirectory . '/src/Http/Response.php';
 require_once $projectDirectory . '/src/Http/ErrorResponder.php';
 $errorResponder = new ErrorResponder($projectDirectory . '/logs/webhook.log',

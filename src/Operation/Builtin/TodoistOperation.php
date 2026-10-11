@@ -43,7 +43,9 @@ final readonly class TodoistOperation implements OperationInterface
             return OperationResult::failure(ErrorCategory::Remote, HttpFailure::BadGateway,
                 'Todoist task or attachment saving failed.',
                 ['todoistDebug' => ['message' => $this->diagnostics->redact($exception->getMessage())] + $context + $progress],
-                externalIds: $ids, progress: $progress, partial: isset($ids['taskId']));
+                externalIds: $ids, progress: $progress, partial: isset($ids['taskId']),
+                providerStatus: isset($exception->context['providerStatus']) && is_int($exception->context['providerStatus'])
+                    ? $exception->context['providerStatus'] : null);
         }
     }
 }

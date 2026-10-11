@@ -15,6 +15,7 @@ final readonly class OperationResult
         public ?HttpFailure $httpFailure,
         public ?string $message,
         public array $diagnostics,
+        public ?int $providerStatus = null,
     ) {
     }
 
@@ -32,9 +33,10 @@ final readonly class OperationResult
         array $progress = [],
         array $outputs = [],
         bool $partial = false,
+        ?int $providerStatus = null,
     ): self {
         return new self($partial ? Outcome::Partial : Outcome::Failure, $outputs,
-            $externalIds, $progress, $category, $httpFailure, $message, $diagnostics);
+            $externalIds, $progress, $category, $httpFailure, $message, $diagnostics, $providerStatus);
     }
 
     public function succeeded(): bool

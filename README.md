@@ -28,14 +28,15 @@ processing before forwarding. The hub currently has no queue or automatic retry.
 
 See the [implementation plan](docs/IMPLEMENTATION_PLAN.md) for the planned
 package-based extensions, Monolog log rotation, and failure notification emails.
-Its checkboxes track implementation progress. Phases 1–6 are complete; the
+Its checkboxes track implementation progress. Phases 1–7 are complete; the
 [compatibility baseline](docs/COMPATIBILITY_BASELINE.md) records current behavior
 and the regression checks that later refactoring must preserve.
 
 The live webhook now runs storage, email, and Todoist through the operation
 registry and their adapters/factories. `WebhookHub` coordinates requests, while the
-response builder preserves legacy fields and adds per-operation results. Monolog,
-failure notification emails, and package examples remain later-phase work.
+response builder preserves legacy fields and adds per-operation results. Monolog
+records structured lifecycle events with rotation and retention. Failure notification
+emails and package examples remain later-phase work.
 
 ## Requirements
 
@@ -85,7 +86,7 @@ autoloaded by Composer under the `Pebble\` namespace:
 - `src/Operation/`: operation contracts, lazy registry, typed results, and destination-independent runner; see the [operation contract](docs/OPERATIONS.md).
 - `src/Bootstrap.php`: loads the environment once and constructs enabled services without executing them.
 - `src/Config/`: separate core, storage, email, Todoist, and logging settings with shared validation; `WebhookConfig` aggregates them. `AlertConfig` prepares failure notification settings for Phase 8.
-- `src/Services/FileLogger.php`: writes private error logs.
+- `src/Logging/`: Monolog factories, private rotating handlers, redaction, and guarded PHP fallback logging.
 - `src/Services/RequestValidator.php`: checks authentication and multipart payloads.
 - `src/Services/RecordingStorage.php`: copies recordings and cleans incomplete writes.
 - `src/Operation/Builtin/`: storage, email, and Todoist adapters/factories with destination validation and sanitized diagnostics.
@@ -260,33 +261,38 @@ Todoist diagnostic fields are preserved.
 
 ## Error logging
 
-With `DEBUG_MODE=false` (the default), webhook errors return only the HTTP status
-code with an empty response body.
-Non-POST requests return 405; missing or incorrect tokens return 401. Successful
-requests still return JSON. Error details are written to `logs/webhook.log`,
-outside the public directory, including validation, configuration, storage, and
-SMTP and Todoist failures. Tokens and SMTP credentials are excluded from the log.
+With `DEBUG_MODE=false` (the default), errors return their HTTP status with an
+empty body. Non-POST requests return 405; missing or incorrect tokens return 401.
+Successful requests still return JSON.
 
-Set `DEBUG_MODE=true` in `.env` to return meaningful JSON errors instead of
-writing error messages to `logs/webhook.log` or failure messages to
-`mail-status.txt`. Status codes stay the same. Debug responses include validation
-messages and guidance for configuration, storage, and SMTP errors; they exclude
-stack traces, tokens, and SMTP credentials. SMTP failures also include
-`smtpDebug.exceptions` with the full exception messages, types, codes, nested
-causes, and available SMTP transcripts. Authentication payloads and configured
-credentials are redacted. Connection failures may have an empty transcript. Successful
-responses and SMTP acceptance status files behave the same in both modes.
+Monolog records accepted/rejected requests, operation starts and outcomes, and
+request completion. The default is JSON, minimum severity `info`, daily rotation,
+and 30 retained files in `logs/`, outside `public/`. For example,
+`webhook-2026-10-11.log`. All events carry the generated request ID used in the
+`X-Request-Id` response header. Operation outcomes include duration, status,
+error category, provider HTTP status when available, and external IDs. Credentials,
+note transcription, audio, and full POST data are excluded; provider diagnostics
+are redacted and limited in size.
 
-Set `LOG_DIRECTORY` and `LOG_FILENAME` to change the private log location; the
-defaults are `logs` and `webhook.log`. Relative directories resolve from the project
-root. Log, storage, and future alert state paths inside `public/` are rejected,
-including paths reached through existing symlinks. Before a valid log path is
-available (for example, missing dependencies or a malformed `.env`), errors use
-the server's PHP error log. Debug mode suppresses these log writes as well.
+`LOG_ENABLED=false` disables application logging. `LOG_LEVEL` filters severity,
+`LOG_FORMAT` selects `json` or `text`, and `LOG_ROTATION` selects `daily`, `monthly`,
+or `none`. `LOG_MAX_FILES` counts retained files including the current file; `0`
+means unlimited and has no effect with `none`. Rotation and cleanup happen on
+writes using `APP_TIMEZONE`. `LOG_DIRECTORY` and `LOG_FILENAME` change the private
+location. New directories/files use 0700/0600 permissions and locked writes.
 
-The PHP user needs permission to create and append to the configured log file.
-New log directories and files use permissions 0700 and 0600. If the private log
-cannot be written, messages fall back to the server's PHP error log.
+`DEBUG_MODE=true` returns meaningful JSON errors with redacted SMTP/Todoist
+diagnostics and suppresses logging by default. Set `LOG_IN_DEBUG=true` to also
+record events in debug mode; `LOG_ENABLED` and `LOG_LEVEL` still apply. SMTP debug
+responses include exception messages, nested causes, and available transcripts;
+authentication payloads are redacted. Connection failures can have empty transcripts.
+Debug mode continues to suppress failure messages in `mail-status.txt`.
+
+Failed log writes use sanitized native PHP logging without changing delivery or
+HTTP responses. Missing dependencies or malformed configuration also use a minimal
+bootstrap fallback. See [logging settings and limitations](docs/LOGGING.md),
+including runtime error handling and errors before bootstrap. Failure notification
+emails are planned for Phase 8 and are not enabled yet.
 
 ## Manual check
 
@@ -300,8 +306,10 @@ php tests/note.php
 php tests/operations.php
 php tests/destinations.php
 php tests/hub.php
+php tests/logging.php
 python3 tests/http.py
 python3 tests/bootstrap_http.py
+python3 tests/logging_http.py
 ```
 
 Then use Pebble or a multipart request such as this (use your actual token,

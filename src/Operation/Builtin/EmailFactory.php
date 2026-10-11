@@ -19,7 +19,7 @@ final readonly class EmailFactory implements OperationFactoryInterface
         ini_set('default_socket_timeout', '15');
         $mailer = $this->mailerFactory === null ? new Mailer(Transport::fromDsn($this->config->smtp->dsn)) : ($this->mailerFactory)($this->config);
         return new EmailOperation(new RecordingMailer($mailer, $this->config->from, $this->config->to,
-            $this->config->subjectPrefix, $dependencies->requestContext->debugMode ? new NullLogger() : $dependencies->logger),
+            $this->config->subjectPrefix, $dependencies->requestContext->debugMode && !$dependencies->logInDebug ? new NullLogger() : ($dependencies->serviceLogger ?? $dependencies->logger)),
             $this->diagnostics, $dependencies->requestContext->debugMode);
     }
 }

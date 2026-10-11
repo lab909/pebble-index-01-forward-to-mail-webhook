@@ -48,12 +48,13 @@ final readonly class TodoistService
             $this->comment($taskId, 'Webhook information', $attachment);
             ++$context['commentsCreated'];
             unset($context['stage']);
-            SafeLog::write($this->logger, 'info', 'Todoist note saved.', $context);
+            SafeLog::write($this->logger, 'debug', 'Todoist note saved.', $context);
             return $context;
         } catch (Throwable $exception) {
-            SafeLog::write($this->logger, 'error', 'Todoist note saving failed.', $context);
+            SafeLog::write($this->logger, 'debug', 'Todoist note saving failed.', $context);
             // Retain IDs so a partial task can be found instead of silently discarded.
-            throw new TodoistException($exception->getMessage(), $context, $exception);
+            throw new TodoistException($exception->getMessage(), $context
+                + ($exception instanceof TodoistException ? array_intersect_key($exception->context, ['providerStatus' => true]) : []), $exception);
         }
     }
 

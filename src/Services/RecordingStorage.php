@@ -46,7 +46,7 @@ final readonly class RecordingStorage
             if (file_put_contents($folder . '/info.txt', $note->infoText, LOCK_EX) !== strlen($note->infoText)) {
                 throw new RuntimeException('Cannot save webhook information.');
             }
-            SafeLog::write($this->logger, 'info', 'Local recording saved.', ['folderName' => $folderName]);
+            SafeLog::write($this->logger, 'debug', 'Local recording saved.', ['folderName' => $folderName]);
             return new StoredRecording($folder, $folderName, $audioPath);
         } catch (Throwable $exception) {
             if ($folder !== null) {
@@ -54,7 +54,7 @@ final readonly class RecordingStorage
                 @unlink($folder . '/info.txt');
                 @rmdir($folder);
             }
-            SafeLog::write($this->logger, 'error', 'Local recording storage failed.');
+            SafeLog::write($this->logger, 'debug', 'Local recording storage failed.');
             throw $exception;
         } finally {
             umask($previousUmask);

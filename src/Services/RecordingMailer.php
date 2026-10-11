@@ -38,9 +38,9 @@ final readonly class RecordingMailer
         try {
             $this->mailer->send($email);
         } catch (Throwable $exception) {
-            SafeLog::write($this->logger, 'error', 'Note email sending failed.');
+            SafeLog::write($this->logger, 'debug', 'Note email sending failed.');
             throw $exception;
         }
-        SafeLog::write($this->logger, 'info', 'Note email accepted by SMTP server.');
+        SafeLog::write($this->logger, 'debug', 'Note email accepted by SMTP server.');
     }
 }

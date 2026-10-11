@@ -4,7 +4,7 @@ Phases 4–6 provide the operation contract, registry/runner, built-in destinati
 adapters/factories, and HTTP integration. `WebhookHub` coordinates the request, and
 `ResponseBuilder` formats execution reports with an explicit `LegacyResultMapper`.
 The public entry point has no destination-specific branches.
-Monolog and failure notifications remain later phases.
+Monolog lifecycle logging is implemented; failure notifications remain Phase 8.
 
 ## Registration and construction
 
@@ -44,9 +44,11 @@ Factories own destination settings and clients. Their `create()` method receives
 `OperationDependencies`: a PSR-3 logger and immutable `RequestContext` with request
 ID, receipt time, and debug mode. It receives no global container, environment,
 or service locator. Built-in services use `SafeLog` so logger failures cannot interrupt delivery.
-Their factories supply a null logger in debug mode to suppress destination log
-writes. Bootstrap currently defaults to a null PSR-3 logger while `ErrorResponder`
-keeps the existing private error log. Monolog configuration arrives in Phase 7.
+Bootstrap supplies request-scoped Monolog loggers, or null loggers when logging is
+disabled or debug mode is active without `LOG_IN_DEBUG=true`. The runner owns the
+single error event for each operation failure; service details use debug severity.
+Use static messages and metadata, never note text, full POST data, audio, or secrets.
+See [logging](LOGGING.md) for sink policy and redaction.
 
 ## Validation and execution
 

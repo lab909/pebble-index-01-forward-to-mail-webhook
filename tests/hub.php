@@ -68,7 +68,7 @@ $originalIni = [];
 foreach (['display_errors', 'log_errors', 'error_log'] as $name) {
     $originalIni[$name] = ini_get($name);
 }
-$base = "WEBHOOK_TOKEN=test-token\nAPP_TIMEZONE=UTC\nSTORE_TO_FOLDER=false\nFORWARD_TO_MAIL=false\nSAVE_TO_TODOIST=false\nDEBUG_MODE=false\n";
+$base = "WEBHOOK_TOKEN=test-token\nAPP_TIMEZONE=UTC\nSTORE_TO_FOLDER=false\nFORWARD_TO_MAIL=false\nSAVE_TO_TODOIST=false\nDEBUG_MODE=false\nLOG_ROTATION=none\n";
 try {
     $handle = static function (Request $request, string $extra = '') use ($root, $base): array {
         $_ENV = [];
@@ -85,7 +85,7 @@ try {
         'CONTENT_TYPE' => 'multipart/form-data', 'HTTP_X_REQUEST_ID' => 'forged-id'];
     $valid = new Request($server, ['recordedAt' => '0', 'transcription' => 'Hub test'], []);
     [$response] = $handle($valid);
-    assertHub($response->status === 200 && $response->body['ok'] && !file_exists($root . '/logs'), 'No-op requests acknowledge without writes');
+    assertHub($response->status === 200 && $response->body['ok'] && !file_exists($root . '/recordings'), 'No-op requests acknowledge without destination writes');
     [$response] = $handle(new Request(array_replace($server, ['REQUEST_METHOD' => 'GET']), [], []));
     assertHub($response->status === 405 && $response->headers['Allow'] === 'POST', 'Preserve method response and headers');
     [$response, $errors] = $handle(new Request(array_replace($server, ['HTTP_AUTHORIZATION' => 'Bearer wrong']), $valid->post, []), "FORWARD_TO_MAIL=true\n");

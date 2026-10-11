@@ -348,7 +348,7 @@ Use Monolog 3 with `Psr\Log\LoggerInterface`. Its file and email handlers provid
 building blocks for this feature; application policy belongs in the hub.
 See [Monolog handlers](https://github.com/Seldaek/monolog/blob/main/doc/02-handlers-formatters-processors.md).
 
-Proposed settings, to be added during implementation:
+Implemented settings:
 
 ```dotenv
 LOG_ENABLED=true
@@ -369,43 +369,49 @@ LOG_IN_DEBUG=false
 - Rotation uses `APP_TIMEZONE` consistently and is triggered by logging activity,
   not a background scheduler. Retention cleanup is therefore write-driven.
 
-- [ ] Add `monolog/monolog:^3` while resolving against PHP 8.2; inspect the actual
+- [x] Add `monolog/monolog:^3` while resolving against PHP 8.2; inspect the actual
       locked handler APIs rather than relying on a newer development branch.
-- [ ] Build a `LoggerFactory` with `RotatingFileHandler` for daily/monthly rotation
+- [x] Build a `LoggerFactory` with `RotatingFileHandler` for daily/monthly rotation
       and `StreamHandler` for unrotated logs.
-- [ ] Translate named rotation settings into validated handler date formats;
+- [x] Translate named rotation settings into validated handler date formats;
       disallow arbitrary filename/date patterns in the initial configuration.
-- [ ] Validate severity, format, retention count, directory, and base filename.
-- [ ] Set private directory/file permissions (0700/0600) and enable write locking.
-- [ ] Keep notification state separate from rotated logs so retention cannot delete
+- [x] Validate severity, format, retention count, directory, and base filename.
+- [x] Set private directory/file permissions (0700/0600) and enable write locking.
+- [x] Keep notification state separate from rotated logs so retention cannot delete
       alert cooldown data.
-- [ ] Add channels/context for hub, operations, and notification infrastructure.
-- [ ] Add request ID, event name, operation ID, duration, outcome, HTTP/provider
+- [x] Add channels/context for hub, operations, and notification infrastructure.
+- [x] Add request ID, event name, operation ID, duration, outcome, HTTP/provider
       status, stable error category, and available external IDs.
-- [ ] Log lifecycle events: accepted request, validation rejection, operation start,
+- [x] Log lifecycle events: accepted request, validation rejection, operation start,
       operation completion/failure, and aggregate hub completion.
-- [ ] Use `warning` for rejected requests, `info` for successful delivery, `error`
+- [x] Use `warning` for rejected requests, `info` for successful delivery, `error`
       for operational failure, and `critical` for application/bootstrap failures.
-- [ ] Record operational failures once centrally; avoid duplicate alerts caused by
+- [x] Record operational failures once centrally; avoid duplicate alerts caused by
       logging the same exception in both service and hub.
-- [ ] Add a recursive redaction processor before any formatter or handler receives
+- [x] Add a recursive redaction processor before any formatter or handler receives
       messages/context. Cover tokens, passwords, DSNs, Authorization, encoded
       authentication exchanges, nested exceptions, and exception arguments.
-- [ ] Exclude note text, audio content, complete POST data, and credentials from
+- [x] Exclude note text, audio content, complete POST data, and credentials from
       normal lifecycle logs. Log metadata sufficient to locate retained files.
-- [ ] Sanitize/truncate provider responses and mark truncated diagnostics.
-- [ ] Replace the current `FileLogger`; retain a minimal sanitized native PHP
+- [x] Sanitize/truncate provider responses and mark truncated diagnostics.
+- [x] Replace the current `FileLogger`; retain a minimal sanitized native PHP
       fallback if Composer, Monolog, or the configured log directory fails.
-- [ ] Isolate handler failures so an unwritable log cannot change a completed
+- [x] Isolate handler failures so an unwritable log cannot change a completed
       delivery outcome or the intended HTTP response.
-- [ ] Bridge uncaught exceptions/fatal errors with guarded PHP handlers where
+- [x] Bridge uncaught exceptions/fatal errors with guarded PHP handlers where
       feasible; document errors occurring before bootstrap that remain in the
       hosting provider's PHP log.
-- [ ] Preserve no file logging in debug by default; allow `LOG_IN_DEBUG=true`
+- [x] Preserve no file logging in debug by default; allow `LOG_IN_DEBUG=true`
       explicitly. Successful and failure events obey the same sink policy.
 
 **Done when:** operators can correlate a request and each operation, control
 rotation/retention, and diagnose failures without logging credentials or notes.
+
+Completed 2026-10-11 with Monolog 3.12.1 on PHP 8.2.33. Dedicated logging
+and HTTP checks cover rotation/DST, retention, private permissions, redaction,
+logging policy, fallback delivery, runtime handlers, and central failure events.
+See [logging operations](LOGGING.md). Notification state and email transport
+remain Phase 8; retention only matches the configured rotated log pattern.
 
 ## Phase 8 — failure notification emails
 
@@ -548,7 +554,7 @@ and logging/notification failure paths are tested on PHP 8.2.
       (phases 1–3).
 - [x] **Milestone B:** operation registry, migrated destinations, thin entry point
       (phases 4–6).
-- [ ] **Milestone C:** Monolog events and rotating logs (phase 7).
+- [x] **Milestone C:** Monolog events and rotating logs (phase 7).
 - [ ] **Milestone D:** failure notification emails and suppression (phase 8).
 - [ ] **Milestone E:** package example, documentation, regression checks, rollout
       (phases 9–10).

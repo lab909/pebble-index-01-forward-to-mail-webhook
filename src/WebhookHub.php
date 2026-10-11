@@ -4,10 +4,11 @@ declare(strict_types=1);
 namespace Pebble;
 
 use DateTimeImmutable;
-use Pebble\Config\{ConfigurationException, CoreConfig, Environment, LoggingConfig, WebhookConfig};
+use Pebble\Config\{ConfigurationException, CoreConfig, Environment, WebhookConfig};
 use Pebble\Http\{ErrorResponder, NoteFactory, Request, Response, ResponseBuilder};
 use Pebble\Operation\{ExecutionReport, RequestContext};
 use Pebble\Services\RequestValidator;
+use Pebble\Services\SafeLog;
 use Throwable;
 
 /** Coordinates the HTTP boundary and generic operation pipeline. */
@@ -24,7 +25,16 @@ final readonly class WebhookHub
 
     public function handle(Request $request): Response
     {
-        return $this->process($request)->withRequestId($this->requestId);
+        $started = hrtime(true);
+        $response = $this->process($request)->withRequestId($this->requestId);
+        if ($this->bootstrap->hasLogging()) {
+            SafeLog::write($this->bootstrap->hubLogger($this->requestId), 'info', 'Webhook request completed.',
+                ['event' => 'hub_completed', 'httpStatus' => $response->status,
+                    'outcome' => $response->status < 400 ? 'success' : 'failure',
+                    'durationMs' => (hrtime(true) - $started) / 1_000_000]);
+            $this->errors->markHandled();
+        }
+        return $response;
     }
 
     private function process(Request $request): Response
@@ -36,13 +46,14 @@ final readonly class WebhookHub
             $this->errors->setDebugMode(WebhookConfig::debugModeFromEnvironment($values));
             $environment = new Environment($this->projectDirectory, $values);
             try {
-                $this->errors->setLogPath(LoggingConfig::fromEnvironment($environment)->path());
+                $this->bootstrap->configureLogging($values, $this->errors, $this->requestId);
             } catch (ConfigurationException $exception) {
                 $this->errors->usePhpErrorLog();
                 $configurationError = $exception->getMessage();
                 throw $exception;
             }
             if (($request->server['REQUEST_METHOD'] ?? '') !== 'POST') {
+                $this->reject(405, 'Use POST.');
                 return new Response(405, ['error' => 'Use POST.'], ['Allow' => 'POST']);
             }
             try {
@@ -54,8 +65,11 @@ final readonly class WebhookHub
             // Authentication and HTTP validation precede optional credentials and client construction.
             $failure = (new RequestValidator($token))->validate($request);
             if ($failure !== null) {
+                $this->reject($failure->status, $failure->body['error']);
                 return $failure;
             }
+            SafeLog::write($this->bootstrap->hubLogger($this->requestId), 'info', 'Webhook request accepted.',
+                ['event' => 'request_accepted']);
             try {
                 $config = WebhookConfig::fromEnvironment($this->projectDirectory, $values);
             } catch (ConfigurationException $exception) {
@@ -66,8 +80,11 @@ final readonly class WebhookHub
             $services = $this->bootstrap->assemble($config, $this->bootstrap->dependencies($context));
         } catch (Throwable) {
             if (($request->server['REQUEST_METHOD'] ?? '') !== 'POST') {
+                $this->reject(405, 'Use POST.');
                 return new Response(405, ['error' => 'Use POST.'], ['Allow' => 'POST']);
             }
+            SafeLog::write($this->bootstrap->hubLogger($this->requestId), 'critical', 'Webhook configuration or bootstrap failed.',
+                ['event' => 'bootstrap_failed', 'httpStatus' => 500, 'errorCategory' => 'configuration', 'reason' => $configurationError ?? 'Invalid configuration or dependencies.']);
             return new Response(500, ['error' => $configurationError
                 ?? 'Check .env configuration, SMTP settings, and Composer dependencies.']);
         }
@@ -76,8 +93,11 @@ final readonly class WebhookHub
             try {
                 if ($services->operations->operations() !== []) {
                     $note = (new NoteFactory($config->timezone, $context->receivedAt))->fromRequest($request);
+                    $this->bootstrap->protectNote($note);
                 }
             } catch (Throwable) {
+                SafeLog::write($this->bootstrap->hubLogger($this->requestId), 'critical', 'Note preparation failed.',
+                    ['event' => 'note_preparation_failed', 'httpStatus' => 500, 'errorCategory' => 'unexpected']);
                 return new Response(500, ['error' => 'Unable to process webhook. Check recording data and storage directory permissions.']);
             }
             $report = $note === null ? new ExecutionReport([], [], []) : $services->runner->run($note);
@@ -87,4 +107,11 @@ final readonly class WebhookHub
             $note?->audio?->cleanup();
         }
     }
+
+    private function reject(int $status, string $reason): void
+    {
+        SafeLog::write($this->bootstrap->hubLogger($this->requestId), 'warning', 'Webhook request rejected.',
+            ['event' => 'request_rejected', 'httpStatus' => $status, 'errorCategory' => 'validation', 'reason' => $reason]);
+    }
+
 }

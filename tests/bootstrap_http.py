@@ -23,7 +23,7 @@ with tempfile.TemporaryDirectory(prefix='pebble-bootstrap-') as temporary:
         if name == 'normal':
             (project / 'vendor').symlink_to(ROOT / 'vendor', target_is_directory=True)
     project = root / 'normal'
-    base = "WEBHOOK_TOKEN=test-token\nAPP_TIMEZONE=UTC\nSTORE_TO_FOLDER=false\nFORWARD_TO_MAIL=false\nSAVE_TO_TODOIST=false\n"
+    base = "WEBHOOK_TOKEN=test-token\nAPP_TIMEZONE=UTC\nSTORE_TO_FOLDER=false\nFORWARD_TO_MAIL=false\nSAVE_TO_TODOIST=false\nLOG_ROTATION=none\n"
     def configure(extra='', debug=False):
         (project / '.env').write_text(base + f'DEBUG_MODE={str(debug).lower()}\n' + extra)
     with socket.socket() as sock:

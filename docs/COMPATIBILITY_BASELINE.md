@@ -238,3 +238,12 @@ operation-runner migration.
   advisory that no package license is declared.
 - `git diff --check`: passed.
 - Changes in this phase: tests, stub failure controls, and documentation.
+
+## Phase 7 logging update
+
+This baseline predates structured logging. Phase 7 preserves response and delivery
+behavior but replaces the error-only file with configurable Monolog lifecycle logs.
+The default is daily JSON rotation with 30 files, including the current file.
+`LOG_ENABLED=false` disables application logs; debug mode still suppresses them
+unless `LOG_IN_DEBUG=true`. See [logging settings](LOGGING.md). Failure notification
+emails remain outside this baseline and are not implemented yet.
