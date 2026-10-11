@@ -22,7 +22,8 @@ copy(dirname(__DIR__) . '/config/operations.php', $root . '/config/operations.ph
 $originalEnv = $_ENV;
 $originalServer = $_SERVER;
 $values = ['FAILURE_EMAIL_ENABLED' => 'true', 'FAILURE_EMAIL_FROM' => 'alerts@example.com',
-    'FAILURE_EMAIL_TO' => 'one@example.com, two@example.com', 'FAILURE_EMAIL_STATE_DIRECTORY' => 'state',
+    'FAILURE_EMAIL_TO' => 'one@example.com, two@example.com',
+    'FAILURE_EMAIL_SUBJECT_PREFIX' => 'Pebble alert-secret failure', 'FAILURE_EMAIL_STATE_DIRECTORY' => 'state',
     'FAILURE_EMAIL_SMTP_SCHEME' => 'smtp', 'FAILURE_EMAIL_SMTP_HOST' => 'localhost', 'FAILURE_EMAIL_SMTP_PORT' => '587',
     'FAILURE_EMAIL_SMTP_USERNAME' => 'alert-user', 'FAILURE_EMAIL_SMTP_PASSWORD' => 'alert-secret'];
 $mailer = new class implements MailerInterface {
@@ -62,6 +63,7 @@ try {
     check(count($mailer->emails) === 1, 'Aggregate and finalize once');
     $email = $mailer->emails[0];
     check(count($email->getTo()) === 2 && count($email->getAttachments()) === 0, 'Recipients without attachments');
+    check(!str_contains($email->getSubject(), 'alert-secret'), 'Alert subject redacts credentials');
     $body = $email->getTextBody();
     check(str_contains($body, '/private/retained') && str_contains($body, 'task-one') && str_contains($body, '+02:00'), 'Partial success, IDs, timezone');
     check(!str_contains($body, 'PRIVATE NOTE CONTENT') && !str_contains($body, 'alert-secret') && !str_contains($body, 'Bearer secret') && !str_contains($body, '"private"'), 'Sanitize before email formatting');

@@ -12,7 +12,6 @@ use Pebble\Config\AlertConfig;
 use Pebble\Logging\{Redactor, RedactionProcessor};
 use Pebble\Operation\{ExecutionReport, HttpFailure, ErrorCategory};
 use Pebble\Services\SafeLog;
-use Symfony\Component\Mailer\Transport;
 use Symfony\Component\Mailer\Transport\Smtp\SmtpTransport;
 use Symfony\Component\Mime\Email;
 use Throwable;
@@ -82,7 +81,7 @@ final class FailureNotifier
                     $handler = null;
                     $mailer = null;
                     try {
-                        $mailer = $this->mailerFactory === null ? Transport::fromDsn($this->config->smtp->dsn) : ($this->mailerFactory)($this->config);
+                        $mailer = $this->mailerFactory === null ? AlertTransportFactory::create($this->config) : ($this->mailerFactory)($this->config);
                         if ($mailer instanceof SmtpTransport) { $mailer->getStream()->setTimeout($this->config->timeoutSeconds); }
                         $truncated = false;
                         $email = (new Email())->from($this->config->from)->to(...$this->config->recipients)

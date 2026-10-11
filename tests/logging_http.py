@@ -53,10 +53,15 @@ switch ($_GET['case'] ?? '') {
                 except OSError:
                     time.sleep(.02)
             configure()
+            (root / 'logs').mkdir(mode=0o700)
+            legacy = root / 'logs/webhook.log'
+            legacy.write_text('legacy error log retained\n')
             result = request()
             assert result[1] == 200, (result, (root / 'server.log').read_text(), [p.read_text() for p in (root / 'logs').glob('*')])
             files = list((root / 'logs').glob('webhook-*.log'))
             assert len(files) == 1
+            assert legacy.read_text() == 'legacy error log retained\n'
+            assert not (root / 'var/alerts').exists(), 'Old env does not enable new alerts'
             records = [json.loads(line) for line in files[0].read_text().splitlines()]
             assert [r['context']['event'] for r in records] == ['request_accepted', 'hub_completed']
             assert records[0]['context']['requestId'] == records[1]['context']['requestId']

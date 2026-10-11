@@ -177,3 +177,6 @@ settings, auth/preflight, success/failure/partial, continue/abort, shared audio,
 private outputs, silent errors, and conflicting/missing bindings. It uses no real
 account credentials and makes no destination API calls. COMPOSER_BINARY can override
 the Composer path; PHP_BINARY selects the PHP interpreter.
+
+For the combined verification command and deploying installed extensions with the
+matching application/vendor files, see [deployment and migration](DEPLOYMENT.md).

@@ -531,36 +531,36 @@ application-owned and deployment remains Phase 10.
 
 ## Phase 10 — verification and migration
 
-- [ ] Run PHP 8.2 syntax, Composer validation, and platform compatibility checks.
-- [ ] Run existing note storage/email/Todoist tests through the new hub pipeline.
-- [ ] Verify all eight switch combinations, all-disabled mode, and missing optional
+- [x] Run PHP 8.2 syntax, Composer validation, and platform compatibility checks.
+- [x] Run existing note storage/email/Todoist tests through the new hub pipeline.
+- [x] Verify all eight switch combinations, all-disabled mode, and missing optional
       credentials.
-- [ ] Verify auth/method/payload rejection occurs before side effects or alerts.
-- [ ] Verify operation preflight, deterministic order, abort/continue policies,
+- [x] Verify auth/method/payload rejection occurs before side effects or alerts.
+- [x] Verify operation preflight, deterministic order, abort/continue policies,
       unknown exceptions, and partial result aggregation.
-- [ ] Verify audio stays readable across operations in both storage modes.
-- [ ] Verify receipt timezone boundaries, paginated project reuse, separate
+- [x] Verify audio stays readable across operations in both storage modes.
+- [x] Verify receipt timezone boundaries, paginated project reuse, separate
       Todoist comments, and absence of task due dates.
-- [ ] Verify production error bodies are empty and debug diagnostics are sanitized.
-- [ ] Test JSON/text formatting, level filtering, daily/monthly/unrotated modes,
+- [x] Verify production error bodies are empty and debug diagnostics are sanitized.
+- [x] Test JSON/text formatting, level filtering, daily/monthly/unrotated modes,
       retention limits, rotation boundaries, and unlimited retention in temporary
       directories. Assert observed retention rather than assuming days equal files.
-- [ ] Test logging under an unwritable directory and malformed configuration.
-- [ ] Test secret redaction in messages, nested context, SMTP transcripts, provider
+- [x] Test logging under an unwritable directory and malformed configuration.
+- [x] Test secret redaction in messages, nested context, SMTP transcripts, provider
       responses, alert subjects/bodies, and bootstrap fallbacks.
-- [ ] Test failure email enabled/disabled with note email enabled/disabled, debug
+- [x] Test failure email enabled/disabled with note email enabled/disabled, debug
       overrides, and file logging disabled.
-- [ ] Test alert batching, cooldown across separate requests, concurrent duplicate
+- [x] Test alert batching, cooldown across separate requests, concurrent duplicate
       failures, different failure signatures, and failed notification SMTP.
-- [ ] Verify one failed alert never triggers another alert or changes the response.
-- [ ] Exercise the external example operation using the same runner contract.
-- [ ] Verify existing `.env` files work without new variables; notification emails
+- [x] Verify one failed alert never triggers another alert or changes the response.
+- [x] Exercise the external example operation using the same runner contract.
+- [x] Verify existing `.env` files work without new variables; notification emails
       remain disabled until explicitly configured.
-- [ ] Update README, `.env.example`, architecture diagram, extension guide, and
+- [x] Update README, `.env.example`, architecture diagram, extension guide, and
       the deployment instructions.
-- [ ] Explain the transition from `logs/webhook.log` to dated files; leave existing
+- [x] Explain the transition from `logs/webhook.log` to dated files; leave existing
       log files untouched unless a separate retention migration is performed.
-- [ ] Keep tests and temporary state isolated from real account credentials.
+- [x] Keep tests and temporary state isolated from real account credentials.
 - [ ] Validate a configured alert transport with one explicit diagnostic test email
       during deployment, then verify one controlled operational failure.
 - [ ] Deploy only when requested; verify the hosted endpoint and all enabled
@@ -568,6 +568,16 @@ application-owned and deployment remains Phase 10.
 
 **Done when:** existing behavior is preserved, extension setup is demonstrated,
 and logging/notification failure paths are tested on PHP 8.2.
+
+Local verification and migration preparation completed 2026-10-12 on PHP 8.2.33.
+`PHP_BINARY=php8.2 python3 tests/verify.py` passed all eight PHP suites, five Python
+suites, syntax for 85 PHP files, Composer manifest validation, and platform checks.
+New checks cover the note-mail/alert matrix, explicit CLI diagnosis, separate-process
+cooldown contention, redacted alert subjects, and legacy logs preserved during
+active retention. See [verification evidence](VERIFICATION.md),
+[architecture](ARCHITECTURE.md), and [deployment/migration](DEPLOYMENT.md).
+The two production-only items remain pending until deployment is requested; no
+real account credentials, endpoint, alert inbox, or rollout was tested here.
 
 ## Suggested implementation milestones
 
@@ -578,7 +588,7 @@ and logging/notification failure paths are tested on PHP 8.2.
 - [x] **Milestone C:** Monolog events and rotating logs (phase 7).
 - [x] **Milestone D:** failure notification emails and suppression (phase 8).
 - [ ] **Milestone E:** package example, documentation, regression checks, rollout
-      (phases 9–10).
+      (phases 9–10). Local preparation is complete; production rollout is pending.
 
 ## Implementation notes
 
@@ -586,6 +596,7 @@ Record deviations, unresolved constraints, and verification evidence here as the
 checklist is executed. Keep implementation decisions separate from claims that
 were verified against a live hosted endpoint or external account.
 
-- [ ] Record the locked Monolog version and verified rotation/notification APIs.
-- [ ] Record commands and outcomes at each completed milestone.
-- [ ] Record production verification separately from local stub test results.
+- [x] Record the locked Monolog version and verified rotation/notification APIs.
+- [x] Record commands and outcomes at each completed milestone.
+- [x] Record production verification separately from local stub test results.
+      Production remains pending; see VERIFICATION.md.

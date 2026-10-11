@@ -32,16 +32,19 @@ until installed, registered, and enabled.
 
 See the [implementation plan](docs/IMPLEMENTATION_PLAN.md) for the planned
 package-based extensions, Monolog log rotation, and failure notification emails.
-Its checkboxes track implementation progress. Phases 1–9 are complete; the
-[compatibility baseline](docs/COMPATIBILITY_BASELINE.md) records current behavior
-and the regression checks that later refactoring must preserve.
+Its checkboxes track implementation progress. Phases 1–9 and Phase 10 local
+verification are complete; production rollout checks remain pending. The
+[compatibility baseline](docs/COMPATIBILITY_BASELINE.md) records the original behavior preserved by refactoring. The
+[verification record](docs/VERIFICATION.md) maps the current suites to the migration checklist.
 
 The live webhook now runs storage, email, and Todoist through the operation
 registry and their adapters/factories. `WebhookHub` coordinates requests, while the
 response builder preserves legacy fields and adds per-operation results. Monolog
-records structured lifecycle events with rotation and retention. Optional failure notification emails use separate SMTP settings and persistent
+records structured lifecycle events with rotation and retention. Optional failure
+notification emails use separate SMTP settings and persistent
 cooldown state. A [Composer package example](docs/EXTENSIONS.md) demonstrates adding
-operations through configuration; deployment verification remains Phase 10.
+operations through configuration; the [deployment guide](docs/DEPLOYMENT.md)
+separates local verification from hosted checks.
 
 ## Requirements
 
@@ -84,6 +87,8 @@ The web server's PHP user needs write access to the project directory to create
 `public/` is the document root. Application code lives alongside it in `src/`,
 autoloaded by Composer under the `Pebble\` namespace:
 
+- [Architecture diagram](docs/ARCHITECTURE.md): request flow, ownership, logging, and notifications.
+- `bin/test-alert-email.php`: explicit CLI alert configuration check or one diagnostic email.
 - `public/webhook.php`: captures the request, bootstraps the hub, and sends its response with minimal fallback handling.
 - `src/WebhookHub.php`: coordinates authentication, configuration, typed note preparation, preflight, execution, outcome recording, and cleanup.
 - `src/Http/ResponseBuilder.php` and `LegacyResultMapper.php`: format generic operation results and preserve existing response fields.
@@ -319,24 +324,21 @@ and limitations](docs/NOTIFICATIONS.md), including synchronous delivery latency.
 
 ## Manual check
 
-First check the syntax:
+Run the complete isolated verification on PHP 8.2:
 
 ```bash
-find src public config tests -name '*.php' -exec php -l {} \;
-php tests/run.php
-php tests/config.php
-php tests/note.php
-php tests/operations.php
-php tests/destinations.php
-php tests/hub.php
-php tests/logging.php
-php tests/notifications.php
-python3 tests/http.py
-python3 tests/bootstrap_http.py
-python3 tests/logging_http.py
-python3 tests/notifications_http.py
-PHP_BINARY=php8.2 python3 tests/extensions.py
+PHP_BINARY=php8.2 python3 tests/verify.py
 ```
+
+This checks syntax (including packages and CLI tools), Composer manifests/platform,
+all PHP suites, all HTTP/SMTP/API checks, and a real offline package installation.
+It uses temporary projects and fake accounts. Existing `.env`, logs, recordings,
+and account credentials are not read or modified. Composer emits advisory warnings
+for unset license metadata and the private example's explicit version.
+
+For migration, permissions, existing logs, rollback, and separate production checks,
+follow the [deployment guide](docs/DEPLOYMENT.md). Its CLI alert diagnostic supports
+`--check` without sending and `--send` for an explicit deployment test email.
 
 Then use Pebble or a multipart request such as this (use your actual token,
 URL, timestamp, and a local M4A file):

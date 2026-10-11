@@ -89,3 +89,10 @@ alerts do not rely on destructors or subscribe to the file logger.
 `notification_configuration_failed` are written to the file-only notifications
 channel when logging policy/level allows them. Failure events never re-enter alert
 delivery. If logs are disabled, alerts can still send without these local events.
+
+## Deployment diagnostic
+
+`php bin/test-alert-email.php --check` validates the enabled alert settings without
+network or state writes. `--send` explicitly sends one diagnostic email, bypassing
+webhook debug/cooldown/threshold gates without consuming notification state.
+Confirm inbox receipt separately. See [deployment checks](DEPLOYMENT.md).

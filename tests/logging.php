@@ -31,13 +31,17 @@ try {
     $logger = (new LoggerFactory($config, $timezone, new Redactor(), false, $clock))->create();
     $mask = umask();
     $logger->info('Before midnight.', ['event' => 'test']);
+    file_put_contents($root . '/daily/webhook.log', 'legacy errors retained');
+    file_put_contents($root . '/daily/cooldown.json', '{}');
     $now = new DateTimeImmutable('2026-03-29 00:00:01', $timezone);
     $logger->info('After midnight.');
     $now = new DateTimeImmutable('2026-03-30 00:00:01', $timezone);
     $logger->info('After DST.');
     check(umask() === $mask, 'Restore caller umask');
-    $files = glob($root . '/daily/*.log');
+    $files = glob($root . '/daily/webhook-*.log');
     check(count($files) === 2 && !file_exists($root . '/daily/webhook-2026-03-28.log'), 'Retention includes current file');
+    check(file_get_contents($root . '/daily/webhook.log') === 'legacy errors retained'
+        && file_get_contents($root . '/daily/cooldown.json') === '{}', 'Active retention excludes legacy logs and cooldown state');
     check((fileperms($root . '/daily') & 0777) === 0700, 'Private directory permissions');
     foreach ($files as $file) { check((fileperms($file) & 0777) === 0600, 'Private file permissions'); }
     $record = json_decode(trim(file_get_contents($root . '/daily/webhook-2026-03-30.log')), true, flags: JSON_THROW_ON_ERROR);
