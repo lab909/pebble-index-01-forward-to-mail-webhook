@@ -9,12 +9,14 @@ use Pebble\Note\Note;
 use Pebble\Recording\StoredRecording;
 use RuntimeException;
 use Throwable;
+use Psr\Log\LoggerInterface;
 
 final readonly class RecordingStorage
 {
     public function __construct(
         private string $storageDirectory,
         private DateTimeZone $timezone,
+        private ?LoggerInterface $logger = null,
     ) {
     }
 
@@ -44,6 +46,7 @@ final readonly class RecordingStorage
             if (file_put_contents($folder . '/info.txt', $note->infoText, LOCK_EX) !== strlen($note->infoText)) {
                 throw new RuntimeException('Cannot save webhook information.');
             }
+            SafeLog::write($this->logger, 'info', 'Local recording saved.', ['folderName' => $folderName]);
             return new StoredRecording($folder, $folderName, $audioPath);
         } catch (Throwable $exception) {
             if ($folder !== null) {
@@ -51,16 +54,11 @@ final readonly class RecordingStorage
                 @unlink($folder . '/info.txt');
                 @rmdir($folder);
             }
+            SafeLog::write($this->logger, 'error', 'Local recording storage failed.');
             throw $exception;
         } finally {
             umask($previousUmask);
         }
     }
 
-    public function recordMailStatus(StoredRecording $recording, bool $sent): void
-    {
-        $status = $sent ? "Accepted by SMTP server.\n"
-            : "SMTP sending failed. Local files retained.\n";
-        @file_put_contents($recording->folder . '/mail-status.txt', $status);
-    }
 }

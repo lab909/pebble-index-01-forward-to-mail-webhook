@@ -1,8 +1,9 @@
 # Operation contract and registry
 
-Phase 4 introduces the extension contract and a tested registry/runner. The live
-webhook continues to use its existing coordinator. Phase 5 implements the built-in
-destination adapters/factories, and Phase 6 integrates the runner into HTTP handling.
+Phases 4 and 5 provide the operation contract, registry/runner, and built-in
+destination adapters/factories. The live webhook uses this pipeline with its
+existing response fields. Phase 6 extracts the remaining HTTP coordination and
+legacy response mapping into dedicated classes.
 Monolog and failure notifications remain later phases.
 
 ## Registration and construction
@@ -42,8 +43,10 @@ writes, send messages, or make delivery API calls during construction.
 Factories own destination settings and clients. Their `create()` method receives
 `OperationDependencies`: a PSR-3 logger and immutable `RequestContext` with request
 ID, receipt time, and debug mode. It receives no global container, environment,
-or service locator. Logger failures must be handled by adapters so they do not
-interrupt delivery; the logging integration is implemented in later phases.
+or service locator. Built-in services use `SafeLog` so logger failures cannot interrupt delivery.
+Their factories supply a null logger in debug mode to suppress destination log
+writes. Bootstrap currently defaults to a null PSR-3 logger while `ErrorResponder`
+keeps the existing private error log. Monolog configuration arrives in Phase 7.
 
 ## Validation and execution
 
@@ -104,3 +107,30 @@ mapping remains outside the runner and is added during the HTTP integration phas
 
 Run the isolated contract tests with `php tests/operations.php`. They use fake
 operations and no production credentials, network destinations, or real delivery.
+
+## Built-in adapters and outcome recording
+
+`LocalStorageFactory`, `EmailFactory`, and `TodoistFactory` construct their own
+services and clients. Bootstrap supplies these as lazy bindings. Disabled
+factories never construct clients, and client construction performs no delivery.
+Test callers can inject mailers and API clients through their respective factories.
+
+The storage adapter returns folder, folder name, and saved audio path in result
+outputs; it never replaces the input note. Its failures remain HTTP 500 and abort
+later operations. Email preserves the transcription-only body and audio/metadata
+attachments; failures remain HTTP 502 with detailed redacted SMTP diagnostics only
+in debug mode. Todoist owns its transcription preflight, monthly project behavior,
+and attachment handling; partial failures retain project/task IDs, comment count,
+and sanitized stage information.
+
+`OutcomeRecorder` observes storage/email execution results after delivery. It writes
+`mail-status.txt` only if storage succeeded and email actually executed. SMTP
+acceptance is recorded in both modes, while failure messages are suppressed in
+debug mode. Email has no storage dependency. Filesystem or logger failures in this
+recorder cannot change the delivery results. `webhook.php` currently preserves the
+legacy result fields and error wording; that compatibility mapping moves into a
+response builder in Phase 6.
+
+Run `php tests/destinations.php` for isolated adapter checks. The HTTP regression
+suite covers all feature combinations, actual local SMTP/API stubs, partial Todoist
+outcomes, shared uploads, and deliberately failing injected service loggers.

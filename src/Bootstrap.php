@@ -5,13 +5,11 @@ namespace Pebble;
 
 use Closure;
 use Pebble\Config\WebhookConfig;
-use Pebble\Services\RecordingStorage;
-use Pebble\Services\RecordingMailer;
-use Pebble\Services\TodoistClient;
-use Pebble\Services\TodoistService;
+use Pebble\Operation\Builtin\{LocalStorageFactory, EmailFactory, TodoistFactory};
+use Pebble\Operation\{OperationDependencies, OperationRegistry, OperationRunner, OutcomeRecorder, RequestContext};
+use Pebble\Services\SmtpDiagnostics;
+use Psr\Log\NullLogger;
 use Symfony\Component\Dotenv\Dotenv;
-use Symfony\Component\Mailer\Mailer;
-use Symfony\Component\Mailer\Transport;
 
 final class Bootstrap
 {
@@ -32,8 +30,7 @@ final class Bootstrap
         return $this->environment;
     }
 
-    /** Prepare the operation pipeline independently of the legacy HTTP coordinator.
-     *  Built-in destination adapters are supplied during the Phase 5 migration.
+    /** Load and validate explicitly registered operations.
      *  @param array<string, \Pebble\Operation\OperationFactoryInterface|class-string|Closure> $factories
      */
     public function prepareOperations(
@@ -41,7 +38,8 @@ final class Bootstrap
         array $factories,
         \Pebble\Operation\OperationDependencies $dependencies,
         array $additionalEnabledSettings = [],
-    ): \Pebble\Operation\OperationRegistry {
+    ): \Pebble\Operation\OperationRegistry
+    {
         $definitions = require $this->projectDirectory . '/config/operations.php';
         if (!is_array($definitions)) {
             throw new \Pebble\Config\ConfigurationException('Invalid operations configuration.');
@@ -54,22 +52,24 @@ final class Bootstrap
         return \Pebble\Operation\OperationRegistry::fromConfiguration($definitions, $settings, $factories, $dependencies);
     }
 
-    public function assemble(WebhookConfig $config): BootstrappedServices
+    public function assemble(WebhookConfig $config, ?OperationDependencies $dependencies = null): BootstrappedServices
     {
-        $storage = $config->storage === null ? null : new RecordingStorage($config->storage->directory, $config->core->timezone);
-        $todoist = null;
-        if ($config->todoist !== null) {
-            $client = $this->todoistClientFactory === null
-                ? new TodoistClient($config->todoist->apiToken)
-                : ($this->todoistClientFactory)($config->todoist);
-            $todoist = new TodoistService($client, $config->todoist->parentProjectId, $config->core->timezone);
+        $dependencies ??= new OperationDependencies(new NullLogger(), new RequestContext(
+            bin2hex(random_bytes(16)), new \DateTimeImmutable('now', $config->timezone), $config->debugMode));
+        // Do not reload Dotenv. Direct callers may supply a typed config without loading .env.
+        $secrets = ['WEBHOOK_TOKEN' => $config->webhookToken, 'TODOIST_API_TOKEN' => $config->todoistApiToken];
+        if ($config->smtpDsn !== null) {
+            $url = parse_url($config->smtpDsn);
+            $secrets['SMTP_USERNAME'] = rawurldecode($url['user'] ?? '');
+            $secrets['SMTP_PASSWORD'] = rawurldecode($url['pass'] ?? '');
         }
-        $mailer = null;
-        if ($config->email !== null) {
-            ini_set('default_socket_timeout', '15');
-            $mailer = new RecordingMailer(new Mailer(Transport::fromDsn($config->email->smtp->dsn)),
-                $config->email->from, $config->email->to, $config->email->subjectPrefix);
-        }
-        return new BootstrappedServices($config, $storage, $mailer, $todoist);
+        $diagnostics = new SmtpDiagnostics($this->environment ?? $secrets);
+        $registry = $this->prepareOperations($config, [
+            'local_storage' => fn () => new LocalStorageFactory($config->storage, $config->timezone),
+            'email' => fn () => new EmailFactory($config->email, $diagnostics),
+            'todoist' => fn () => new TodoistFactory($config->todoist, $config->timezone, $diagnostics, $this->todoistClientFactory),
+        ], $dependencies);
+        return new BootstrappedServices($config, $registry, new OperationRunner($registry),
+            new OutcomeRecorder($dependencies->logger));
     }
 }

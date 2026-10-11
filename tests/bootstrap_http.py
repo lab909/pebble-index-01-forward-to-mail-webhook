@@ -18,6 +18,7 @@ with tempfile.TemporaryDirectory(prefix='pebble-bootstrap-') as temporary:
         (project / 'public').mkdir(parents=True)
         shutil.copy(ROOT / 'public/webhook.php', project / 'public/webhook.php')
         (project / 'src').symlink_to(ROOT / 'src', target_is_directory=True)
+        (project / 'config').symlink_to(ROOT / 'config', target_is_directory=True)
         if name == 'normal':
             (project / 'vendor').symlink_to(ROOT / 'vendor', target_is_directory=True)
     project = root / 'normal'

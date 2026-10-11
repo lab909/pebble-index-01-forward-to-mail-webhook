@@ -24,6 +24,20 @@ function check(bool $condition, string $message): void
     }
 }
 
+// Observe the service outcomes through the core recorder, independently of email.
+function recordMailOutcome(\Pebble\Recording\StoredRecording $stored, bool $sent): void
+{
+    $now = new DateTimeImmutable();
+    $storageResult = \Pebble\Operation\OperationResult::success(['folder' => $stored->folder]);
+    $emailResult = $sent ? \Pebble\Operation\OperationResult::success()
+        : \Pebble\Operation\OperationResult::failure(\Pebble\Operation\ErrorCategory::Transport,
+            \Pebble\Operation\HttpFailure::BadGateway, 'SMTP sending failed.');
+    (new \Pebble\Operation\OutcomeRecorder())->record(new \Pebble\Operation\ExecutionReport([], [
+        'local_storage' => new \Pebble\Operation\ExecutionEntry('local_storage', $now, 0, $storageResult),
+        'email' => new \Pebble\Operation\ExecutionEntry('email', $now, 0, $emailResult),
+    ], []), false);
+}
+
 $directory = sys_get_temp_dir() . '/pebble-tests-' . bin2hex(random_bytes(6));
 mkdir($directory, 0700);
 $originalUmask = umask();
@@ -85,7 +99,7 @@ try {
     $note = $noteFactory->fromRequest(new Request($server, $post, []));
     $recording = $storage->save($note);
     $service->send($note);
-    $storage->recordMailStatus($recording, true);
+    recordMailOutcome($recording, true);
     $folder = $recording->folder;
     $info = json_decode(file_get_contents($folder . '/info.txt'), true, flags: JSON_THROW_ON_ERROR);
     check(array_keys($info) === ['receivedAt', 'recordedAt', 'timezone', 'postFields', 'audio', 'headers'],
@@ -124,7 +138,7 @@ try {
         $service->send($note);
         throw new LogicException('Expected sending failure');
     } catch (RuntimeException $exception) {
-        $storage->recordMailStatus($recording, false);
+        recordMailOutcome($recording, false);
     }
     check(is_file($folder . '/info.txt'), 'Retain files after SMTP failure');
     check(str_contains(file_get_contents($folder . '/mail-status.txt'), 'failed'), 'Record SMTP failure');

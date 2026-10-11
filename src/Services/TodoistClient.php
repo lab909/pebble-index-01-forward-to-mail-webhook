@@ -6,6 +6,7 @@ namespace Pebble\Services;
 use CURLFile;
 use CURLStringFile;
 use JsonException;
+use Psr\Log\LoggerInterface;
 use Pebble\Exception\TodoistException;
 
 final readonly class TodoistClient
@@ -13,6 +14,7 @@ final readonly class TodoistClient
     public function __construct(
         #[\SensitiveParameter] private string $token,
         private string $baseUrl = 'https://api.todoist.com/api/v1',
+        private ?LoggerInterface $logger = null,
     ) {
     }
 
@@ -79,6 +81,7 @@ final readonly class TodoistClient
             if (!is_array($data)) {
                 throw new TodoistException('Todoist returned an unexpected response.');
             }
+            SafeLog::write($this->logger, 'debug', 'Todoist API request succeeded.', ['method' => $method, 'path' => strtok($path, '?'), 'status' => $status]);
             return $data;
         } finally {
             curl_close($curl);

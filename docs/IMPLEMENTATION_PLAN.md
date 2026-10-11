@@ -259,24 +259,45 @@ and diff checks also pass. PSR-3 is now a direct dependency, using the already l
 
 ## Phase 5 — migrate the existing destinations
 
-- [ ] Wrap `RecordingStorage` in `LocalStorageOperation`; return the stored folder
+- [x] Wrap `RecordingStorage` in `LocalStorageOperation`; return the stored folder
       and paths through an operation result rather than a replacement input note.
-- [ ] Wrap `RecordingMailer` in `EmailOperation`; preserve transcription-only body
+- [x] Wrap `RecordingMailer` in `EmailOperation`; preserve transcription-only body
       and audio/metadata attachments.
-- [ ] Wrap `TodoistService` in `TodoistOperation`; preserve project pagination,
+- [x] Wrap `TodoistService` in `TodoistOperation`; preserve project pagination,
       same-server monthly creation lock, upload behavior, and comments.
-- [ ] Move Todoist-specific transcription validation out of `webhook.php`.
-- [ ] Move all SMTP/Todoist client construction into their operation factories.
-- [ ] Move sanitized destination diagnostics into their adapters/shared formatter;
+- [x] Move Todoist-specific transcription validation out of `webhook.php`.
+- [x] Move all SMTP/Todoist client construction into their operation factories.
+- [x] Move sanitized destination diagnostics into their adapters/shared formatter;
       HTTP code must not know SMTP exception types or Todoist exception context.
-- [ ] Preserve `mail-status.txt` through a core outcome recorder that observes
+- [x] Preserve `mail-status.txt` through a core outcome recorder that observes
       storage/email results. Email must not depend on a storage service instance.
-- [ ] Preserve the debug-mode suppression of failure status messages in that file.
-- [ ] Update services to accept injected loggers; do not let service logging errors
+- [x] Preserve the debug-mode suppression of failure status messages in that file.
+- [x] Update services to accept injected loggers; do not let service logging errors
       interrupt actual delivery.
-- [ ] Remove obsolete `Recording` plumbing after all consumers migrate.
+- [x] Remove obsolete `Recording` plumbing after all consumers migrate.
 
 **Done when:** storage, email, and Todoist behave as before behind the shared contract.
+
+**Completed 2026-10-11 on PHP 8.2.33.** Storage, email, and Todoist now execute
+through built-in operation adapters and lazy destination factories. Factories own
+SMTP/API client construction, and adapters own preflight and sanitized diagnostics.
+The live endpoint consumes generic execution reports while preserving existing
+response shapes; extracting its remaining coordination and compatibility mapping
+is Phase 6.
+
+`OutcomeRecorder` observes independent storage/email results and preserves SMTP
+status files, including debug suppression of failures. Destination services accept
+injected PSR-3 loggers and protect delivery with best-effort logging. Debug factories
+supply null loggers. Monolog wiring and logging configuration remain Phase 7.
+The obsolete `Recording` input was already removed during Phase 3.
+
+Validation: adapter/factory and outcome recorder tests cover preflight before writes,
+SMTP diagnostics redaction, result classification, storage aborts, debug behavior,
+and broken filesystem/logger isolation. The full local HTTP suite exercises every
+feature combination and partial Todoist stage with a deliberately failing injected
+logger, preserving successful delivery and shared PHP uploads. Existing PHP 8.2
+regression suites, bootstrap checks, syntax, Composer/platform, and diff checks pass.
+All tests use temporary settings/files and local stubs without production credentials.
 
 ## Phase 6 — thin entry point and stable HTTP responses
 

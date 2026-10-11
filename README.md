@@ -27,15 +27,15 @@ processing before forwarding. The hub currently has no queue or automatic retry.
 ## Development roadmap
 
 See the [implementation plan](docs/IMPLEMENTATION_PLAN.md) for the planned
-operation pipeline, package-based extensions, Monolog log rotation, and failure
-notification emails. Its checkboxes track future implementation; these roadmap
-features are not yet available in the running hub. Phases 1–4 are complete; the
+package-based extensions, Monolog log rotation, and failure notification emails.
+Its checkboxes track implementation progress. Phases 1–5 are complete; the
 [compatibility baseline](docs/COMPATIBILITY_BASELINE.md) records current behavior
 and the regression checks that later refactoring must preserve.
 
-Phase 4 provides a tested operation registry and runner. The live webhook still
-uses its existing destination coordination; Phase 5 supplies destination adapters,
-and Phase 6 connects the runner to the thin HTTP entry point.
+The live webhook now runs storage, email, and Todoist through the operation
+registry and their adapters/factories. Phase 6 moves the remaining HTTP coordination
+and legacy response mapping into the hub and response builder. Monolog, failure
+notification emails, and package examples remain later-phase work.
 
 ## Requirements
 
@@ -85,7 +85,9 @@ autoloaded by Composer under the `Pebble\` namespace:
 - `src/Config/`: separate core, storage, email, Todoist, and logging settings with shared validation; `WebhookConfig` aggregates them. `AlertConfig` prepares failure notification settings for Phase 8.
 - `src/Services/FileLogger.php`: writes private error logs.
 - `src/Services/RequestValidator.php`: checks authentication and multipart payloads.
-- `src/Services/RecordingStorage.php`: saves recordings, cleans incomplete writes, and records mail status.
+- `src/Services/RecordingStorage.php`: copies recordings and cleans incomplete writes.
+- `src/Operation/Builtin/`: storage, email, and Todoist adapters/factories with destination validation and sanitized diagnostics.
+- `src/Operation/OutcomeRecorder.php`: observes storage/email results and writes mail status independently of delivery.
 - `src/Services/RecordingMailer.php`: builds and sends emails through Symfony Mailer.
 - `src/Services/TodoistClient.php`: calls the Todoist API and uploads files.
 - `src/Services/TodoistService.php`: finds or creates monthly projects, then creates tasks and attachment comments.
@@ -262,6 +264,7 @@ php tests/run.php
 php tests/config.php
 php tests/note.php
 php tests/operations.php
+php tests/destinations.php
 python3 tests/http.py
 python3 tests/bootstrap_http.py
 ```

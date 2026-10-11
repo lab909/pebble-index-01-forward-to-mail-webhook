@@ -30,7 +30,7 @@ final readonly class SmtpDiagnostics
         return ['exceptions' => $exceptions];
     }
 
-    private function redact(string $text): string
+    public function redact(string $text): string
     {
         // Keep SMTP commands and server replies, but remove authentication payloads.
         $text = preg_replace_callback('/^(.*? > )([^\r\n]*)(\r?)$/m', static function (array $match): string {

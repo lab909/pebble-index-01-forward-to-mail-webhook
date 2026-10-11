@@ -33,6 +33,8 @@ function rejects(callable $operation, string $field): void
 $root = sys_get_temp_dir() . '/pebble-config-' . bin2hex(random_bytes(6));
 mkdir($root, 0700);
 mkdir($root . '/public', 0700);
+mkdir($root . '/config', 0700);
+copy(dirname(__DIR__) . '/config/operations.php', $root . '/config/operations.php');
 symlink($root . '/public', $root . '/linked-public');
 $originalEnv = $_ENV;
 $originalServer = $_SERVER;
@@ -77,13 +79,13 @@ try {
     $config = WebhookConfig::fromEnvironment($root, $values);
     $services = $bootstrap->assemble($config);
     verify($config->storage === null && $config->email === null && $config->todoist === null, 'Disabled configuration ignores credentials');
-    verify($services->storage === null && $services->mailer === null && $services->todoist === null && $factoryCalls === 0, 'Disabled clients not constructed');
+    verify($services->operations->operations() === [] && $factoryCalls === 0, 'Disabled clients not constructed');
     $values = array_replace($values, ['STORE_TO_FOLDER' => 'true', 'FORWARD_TO_MAIL' => 'true', 'SAVE_TO_TODOIST' => 'true',
         'STORAGE_DIRECTORY' => 'recordings', 'SMTP_SCHEME' => 'smtp', 'SMTP_HOST' => 'localhost', 'SMTP_PORT' => '587',
         'SMTP_USERNAME' => 'user', 'SMTP_PASSWORD' => 'password', 'MAIL_FROM' => 'from@example.com', 'MAIL_TO' => 'to@example.com',
         'MAIL_SUBJECT_PREFIX' => 'Pebble', 'TODOIST_API_TOKEN' => 'token', 'TODOIST_PARENT_PROJECT' => 'parent']);
     $services = $bootstrap->assemble(WebhookConfig::fromEnvironment($root, $values));
-    verify($services->storage !== null && $services->mailer !== null && $services->todoist !== null && $factoryCalls === 1, 'Construct enabled clients');
+    verify(count($services->operations->operations()) === 3 && $factoryCalls === 1, 'Construct enabled clients');
     verify(!file_exists($root . '/recordings') && !file_exists($root . '/logs'), 'Bootstrap does not execute destination work or logging');
 
     $alertValues = ['FAILURE_EMAIL_FROM' => 'from@example.com', 'FAILURE_EMAIL_TO' => 'one@example.com, two@example.com',
@@ -117,6 +119,8 @@ try {
     if (file_exists($root . '/.env')) {
         unlink($root . '/.env');
     }
+    unlink($root . '/config/operations.php');
+    rmdir($root . '/config');
     rmdir($root . '/public');
     rmdir($root);
 }

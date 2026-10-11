@@ -5,6 +5,8 @@ namespace Pebble\Services;
 
 use Pebble\Note\Note;
 use Symfony\Component\Mailer\MailerInterface;
+use Psr\Log\LoggerInterface;
+use Throwable;
 use Symfony\Component\Mime\Email;
 use Symfony\Component\Mime\Part\DataPart;
 use Symfony\Component\Mime\Part\File;
@@ -18,6 +20,7 @@ final readonly class RecordingMailer
         string $from,
         string $to,
         private string $subjectPrefix,
+        private ?LoggerInterface $logger = null,
     ) {
         // Validate addresses during configuration, before any files are saved.
         $this->email = (new Email())->from($from)->to($to);
@@ -32,6 +35,12 @@ final readonly class RecordingMailer
         if ($note->audio !== null) {
             $email->addPart(new DataPart(new File($note->audio->path), 'audio.m4a', 'audio/mp4'));
         }
-        $this->mailer->send($email);
+        try {
+            $this->mailer->send($email);
+        } catch (Throwable $exception) {
+            SafeLog::write($this->logger, 'error', 'Note email sending failed.');
+            throw $exception;
+        }
+        SafeLog::write($this->logger, 'info', 'Note email accepted by SMTP server.');
     }
 }

@@ -103,17 +103,27 @@ with tempfile.TemporaryDirectory(prefix='pebble-http-') as directory:
         '$bootstrap = new Bootstrap($projectDirectory, '
         'static fn (\\Pebble\\Config\\TodoistConfig $config): \\Pebble\\Services\\TodoistClient '
         f'=> new \\Pebble\\Services\\TodoistClient($config->apiToken, "{todoist.url}"));')
-    # Check the actual PHP upload remains readable after storage and PHP owns cleanup.
-    endpoint = endpoint.replace('$storedRecording = $storage->save($note);',
-        '$storedRecording = $storage->save($note); '
-        'if ($note->audio !== null) { '
+    # All live service logging must be harmless even when the injected logger is broken.
+    endpoint = endpoint.replace('$services = $bootstrap->assemble($config);',
+        '$services = $bootstrap->assemble($config, new \\Pebble\\Operation\\OperationDependencies('
+        'new class extends \\Psr\\Log\\AbstractLogger {'
+        'public function log($level, string|\\Stringable $message, array $context = []): void {'
+        'throw new \\RuntimeException("Simulated logger failure"); } }, '
+        'new \\Pebble\\Operation\\RequestContext("http-test", new \\DateTimeImmutable(), $config->debugMode)));')
+    # Verify the runner leaves PHP-owned input readable after every destination finishes.
+    endpoint = endpoint.replace('$services->outcomeRecorder->record($report, $config->debugMode);',
+        '$services->outcomeRecorder->record($report, $config->debugMode); '
+        'if ($note?->audio !== null) { '
         '$note->audio->cleanup(); '
         'if ($note->audio->ownership !== \\Pebble\\Note\\AssetOwnership::PhpUpload '
-        '|| !is_uploaded_file($note->audio->path) '
-        '|| file_get_contents($note->audio->path) !== file_get_contents($storedRecording->audioPath)) { '
-        'throw new \\RuntimeException("Shared PHP upload was lost or modified."); } }')
+        '|| !is_uploaded_file($note->audio->path)) { '
+        'throw new \\RuntimeException("Shared PHP upload was lost."); } '
+        '$path = $report->entries["local_storage"]->result->outputs["audioPath"] ?? null; '
+        'if ($path !== null && file_get_contents($note->audio->path) !== file_get_contents($path)) { '
+        'throw new \\RuntimeException("Shared PHP upload was modified."); } }')
     (project / 'public/webhook.php').write_text(endpoint)
     (project / 'src').symlink_to(ROOT / 'src', target_is_directory=True)
+    (project / 'config').symlink_to(ROOT / 'config', target_is_directory=True)
     (project / 'vendor').symlink_to(ROOT / 'vendor', target_is_directory=True)
     certificate, key = project / 'cert.pem', project / 'key.pem'
     subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes',

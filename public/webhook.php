@@ -12,8 +12,6 @@ use Pebble\Http\Response;
 use Pebble\Http\NoteFactory;
 use Pebble\Http\ErrorResponder;
 use Pebble\Services\RequestValidator;
-use Pebble\Services\SmtpDiagnostics;
-use Pebble\Exception\TodoistException;
 
 $projectDirectory = dirname(__DIR__);
 // Load error handling directly so missing Composer dependencies are handled too.
@@ -72,9 +70,6 @@ try {
     }
     $errorResponder->setLogPath($config->logging->path());
     $services = $bootstrap->assemble($config);
-    $storage = $services->storage;
-    $mailer = $services->mailer;
-    $todoist = $services->todoist;
 } catch (Throwable $exception) {
     if (($request->server['REQUEST_METHOD'] ?? '') !== 'POST') {
         $errorResponder->send(new Response(405, ['error' => 'Use POST.'], ['Allow' => 'POST']));
@@ -86,66 +81,56 @@ try {
 }
 
 $note = null;
-$storedRecording = null;
 try {
     try {
-        if ($storage !== null || $mailer !== null || $todoist !== null) {
+        if ($services->operations->operations() !== []) {
             $note = (new NoteFactory($config->timezone))->fromRequest($request);
-            if ($todoist !== null && trim($note->transcription) === '') {
-                $errorResponder->send(new Response(400, ['error' => 'Todoist requires a non-empty transcription.']));
-                return;
-            }
         }
-        if ($storage !== null) {
-            $storedRecording = $storage->save($note);
-        }
-    } catch (Throwable $exception) {
+    } catch (Throwable) {
         $errorResponder->send(new Response(500, ['error' => 'Unable to process webhook. Check recording data and storage directory permissions.']));
         return;
     }
-
-    $result = ['ok' => true, 'saved' => $storage !== null, 'emailSent' => false, 'todoistSaved' => false];
-    $failures = [];
-    if ($storedRecording?->folderName !== null) {
-        $result['folder'] = $storedRecording->folderName;
+    // Legacy response mapping stays here until Phase 6 introduces the response builder.
+    $report = $note === null ? new \Pebble\Operation\ExecutionReport([], [], []) : $services->runner->run($note);
+    $services->outcomeRecorder->record($report, $config->debugMode);
+    if ($report->validationFailures !== []) {
+        $failure = array_values($report->validationFailures)[0];
+        $errorResponder->send(new Response($report->httpFailure()->value, ['error' => $failure->message]));
+        return;
     }
-    if ($mailer !== null) {
-        try {
-            $mailer->send($note);
-            $storage?->recordMailStatus($storedRecording, true);
-            $result['emailSent'] = true;
-        } catch (Throwable $exception) {
-            if (!$config->debugMode) {
-                $storage?->recordMailStatus($storedRecording, false);
-            }
-            $failures[] = $storage !== null ? 'Saved locally, but SMTP sending failed.' : 'SMTP sending failed.';
-            if ($config->debugMode) {
-                $result['smtpDebug'] = (new SmtpDiagnostics($environment))->describe($exception);
+    if ($report->httpFailure() === \Pebble\Operation\HttpFailure::InternalServerError) {
+        foreach ($report->entries as $entry) {
+            if ($entry->result->httpFailure === \Pebble\Operation\HttpFailure::InternalServerError) {
+                $errorResponder->send(new Response(500, ['error' => $entry->result->message]));
+                return;
             }
         }
     }
-    if ($todoist !== null) {
-        try {
-            $todoistResult = $todoist->save($note);
-            $result['todoistSaved'] = true;
-            $result['todoistProjectId'] = $todoistResult['projectId'];
-            $result['todoistTaskId'] = $todoistResult['taskId'];
-        } catch (TodoistException $exception) {
-            $failures[] = 'Todoist task or attachment saving failed.';
-            if (isset($exception->context['projectId'])) {
-                $result['todoistProjectId'] = $exception->context['projectId'];
-            }
-            if (isset($exception->context['taskId'])) {
-                $result['todoistTaskId'] = $exception->context['taskId'];
-            }
-            // API errors are sanitized in the client; never include a raw request or token.
-            $result['todoistDebug'] = ['message' => $exception->getMessage()] + $exception->context;
+    $stored = $report->entries['local_storage']->result ?? null;
+    $email = $report->entries['email']->result ?? null;
+    $todoist = $report->entries['todoist']->result ?? null;
+    $result = ['ok' => true, 'saved' => $stored?->succeeded() ?? false,
+        'emailSent' => $email?->succeeded() ?? false, 'todoistSaved' => $todoist?->succeeded() ?? false];
+    if (isset($stored->outputs['folderName'])) {
+        $result['folder'] = $stored->outputs['folderName'];
+    }
+    foreach (['projectId' => 'todoistProjectId', 'taskId' => 'todoistTaskId'] as $key => $field) {
+        if (isset($todoist->externalIds[$key])) {
+            $result[$field] = $todoist->externalIds[$key];
+        }
+    }
+    $failures = [];
+    foreach ($report->entries as $id => $entry) {
+        if (!$entry->result->succeeded()) {
+            $failures[] = $id === 'email' && ($stored?->succeeded() ?? false)
+                ? 'Saved locally, but SMTP sending failed.' : $entry->result->message;
+            $result += $entry->result->diagnostics;
         }
     }
     if ($failures !== []) {
         unset($result['ok']);
         $result['error'] = implode(' ', $failures);
-        $errorResponder->send(new Response(502, $result));
+        $errorResponder->send(new Response($report->httpFailure()->value, $result));
         return;
     }
     (new Response(200, $result))->send();

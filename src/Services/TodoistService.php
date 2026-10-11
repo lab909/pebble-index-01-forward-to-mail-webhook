@@ -7,6 +7,7 @@ use DateTimeZone;
 use Pebble\Exception\TodoistException;
 use Pebble\Note\Note;
 use Throwable;
+use Psr\Log\LoggerInterface;
 
 final readonly class TodoistService
 {
@@ -14,6 +15,7 @@ final readonly class TodoistService
         private TodoistClient $client,
         private string $parentProjectId,
         private DateTimeZone $timezone,
+        private ?LoggerInterface $logger = null,
     ) {
     }
 
@@ -46,8 +48,10 @@ final readonly class TodoistService
             $this->comment($taskId, 'Webhook information', $attachment);
             ++$context['commentsCreated'];
             unset($context['stage']);
+            SafeLog::write($this->logger, 'info', 'Todoist note saved.', $context);
             return $context;
         } catch (Throwable $exception) {
+            SafeLog::write($this->logger, 'error', 'Todoist note saving failed.', $context);
             // Retain IDs so a partial task can be found instead of silently discarded.
             throw new TodoistException($exception->getMessage(), $context, $exception);
         }
