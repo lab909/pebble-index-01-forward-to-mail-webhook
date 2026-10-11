@@ -20,7 +20,7 @@ Unrotated logs use the base filename. Rotation dates and timestamps use
 without logging activity. Retention counts files, not elapsed days. Changing a
 filename or rotation policy does not migrate or remove old files using another
 pattern. Zero means unlimited storage; unrotated logs also grow without a size cap.
-Future notification cooldown state is independent of rotated log files.
+Notification cooldown state is independent of rotated log files.
 
 New directories use 0700 and files 0600, with write locking. Configure the PHP
 process user to own the log directory; existing directory permissions are not
@@ -31,8 +31,9 @@ trusted administrative ownership. Do not serve private paths through web aliases
 
 `hub` logs request acceptance, rejection, bootstrap failure, and completion.
 `operations` logs operation start, completion, preflight rejection, and failure.
-The logger factory also supports a `notifications` channel for Phase 8; no email
-handler or notification state writer is activated in this phase.
+The `notifications` channel records operator-alert outcomes in the file-only logger.
+Email delivery uses a separate request finalization pipeline, independent of file
+logging and its severity filter. See [notifications](NOTIFICATIONS.md).
 
 Each event includes the internally generated `requestId`. Incoming request IDs
 are ignored. Search for the `X-Request-Id` response header to follow one request.
@@ -75,5 +76,6 @@ prevents recovery, and hosting/SAPI-generated diagnostics may remain in the prov
 own PHP/server logs. Those logs and access logs are outside application sink policy;
 keep PHP display_errors disabled in hosting configuration as well.
 
-Failure notification emails, severity thresholds for alerts, and cooldown/state
-handling are the next phase, independent of note forwarding through SMTP.
+Optional [failure notification emails](NOTIFICATIONS.md) have separate SMTP, severity,
+and debug settings, plus private persistent cooldown state. They are independent
+of note forwarding and cannot recursively alert on notification failures.

@@ -422,7 +422,7 @@ Monolog's [`SymfonyMailerHandler`](https://github.com/Seldaek/monolog/blob/main/
 and [`DeduplicationHandler`](https://github.com/Seldaek/monolog/blob/main/src/Monolog/Handler/DeduplicationHandler.php)
 can supply the transport and buffering/suppression primitives.
 
-Proposed settings:
+Implemented settings:
 
 ```dotenv
 FAILURE_EMAIL_ENABLED=false
@@ -442,51 +442,61 @@ FAILURE_EMAIL_SMTP_USERNAME='alert-smtp-username'
 FAILURE_EMAIL_SMTP_PASSWORD='alert-smtp-password'
 ```
 
-- [ ] Parse/validate alert settings only when enabled. Validate recipients, SMTP
+- [x] Parse/validate alert settings only when enabled. Validate recipients, SMTP
       scheme/port, non-negative cooldown, positive timeout, severity, and private
       writable state directory before delivery.
-- [ ] Support one or more recipients with a documented comma-separated format.
-- [ ] Require verified TLS: SMTP with STARTTLS or SMTPS with implicit TLS.
-- [ ] Gate alerts independently from file logging: `LOG_ENABLED=false` may still
+- [x] Support one or more recipients with a documented comma-separated format.
+- [x] Require verified TLS: SMTP with STARTTLS or SMTPS with implicit TLS.
+- [x] Gate alerts independently from file logging: `LOG_ENABLED=false` may still
       allow failure emails when their switch is enabled.
-- [ ] Keep alerts disabled in debug unless `FAILURE_EMAIL_IN_DEBUG=true`.
-- [ ] Restrict alerts to operational/configuration failures, even if the configured
+- [x] Keep alerts disabled in debug unless `FAILURE_EMAIL_IN_DEBUG=true`.
+- [x] Restrict alerts to operational/configuration failures, even if the configured
       threshold is lowered. Invalid methods, bad tokens, and malformed requests
       must not trigger operator emails.
-- [ ] Aggregate reportable failures into at most one alert email per webhook.
-- [ ] Include request ID, failed operations/stages, timestamp/timezone, sanitized
+- [x] Aggregate reportable failures into at most one alert email per webhook.
+- [x] Include request ID, failed operations/stages, timestamp/timezone, sanitized
       diagnostics, partial success, external IDs, and retained folder reference.
-- [ ] Do not attach audio, metadata files, transcription, raw POST data, or secrets
+- [x] Do not attach audio, metadata files, transcription, raw POST data, or secrets
       to alerts by default.
-- [ ] Keep stable failure fingerprints separate from changing IDs/timestamps:
+- [x] Keep stable failure fingerprints separate from changing IDs/timestamps:
       derive them from operation, stage, provider code, and error category.
-- [ ] Use stable notification record messages for deduplication and keep unique
+- [x] Use stable notification record messages for deduplication and keep unique
       request details in context. Monolog's duplicate matching must not be defeated
       by a timestamp/task ID embedded in the message.
-- [ ] Persist cooldown state across requests in private files and guard concurrent
+- [x] Persist cooldown state across requests in private files and guard concurrent
       access. Verify the locked Monolog handler's behavior; add application-level
       locking when necessary. Do not use per-request memory for suppression.
-- [ ] Record sent/suppressed/failed notification outcomes in the file-only logger
+- [x] Record sent/suppressed/failed notification outcomes in the file-only logger
       when allowed, without sending another notification about that same event.
-- [ ] Guard against recursion and catch alert handler/transport exceptions. An
+- [x] Guard against recursion and catch alert handler/transport exceptions. An
       alert failure must never re-enter the alert pipeline.
-- [ ] Flush and close handlers explicitly in a guarded finalization step before
+- [x] Flush and close handlers explicitly in a guarded finalization step before
       sending the HTTP response; do not depend on destructor execution for alerts.
-- [ ] Bound alert network time and leave the original operation results and HTTP
+- [x] Bound alert network time and leave the original operation results and HTTP
       status unchanged if an alert cannot be sent.
-- [ ] Define failed-send cooldown behavior: apply a short retry suppression window
+- [x] Define failed-send cooldown behavior: apply a short retry suppression window
       to avoid repeated failed SMTP attempts, but do not mark an alert as delivered.
-- [ ] If alert configuration is broken, use the bootstrap/file-only fallback and
+- [x] If alert configuration is broken, use the bootstrap/file-only fallback and
       preserve the operational request path where possible; do not create a loop
       trying to email a notification about invalid notification credentials.
-- [ ] Document that SMTP outage notifications need an independently working
+- [x] Document that SMTP outage notifications need an independently working
       transport; blocked outbound ports or a host-wide outage can affect both.
-- [ ] Preserve conditional credential requirements when note email is disabled but
+- [x] Preserve conditional credential requirements when note email is disabled but
       failure notification email is enabled, and vice versa.
 
 **Done when:** a real operational failure produces a bounded, sanitized alert,
 repeated identical failures are suppressed, and notification failure cannot
 break successful delivery or cause recursive emails.
+
+Completed 2026-10-11. Separate verified-TLS SMTP, guarded batch finalization,
+private atomic cooldown state, and nonblocking concurrency locks are implemented.
+Failed sends reserve 30 seconds without being marked delivered. Tests cover
+aggregation, redaction, debug/level policy, conditional settings, provider fingerprints,
+concurrency, verified SMTPS, missing STARTTLS, certificate mismatch, and SMTP timeouts.
+See [notification operations and limitations](NOTIFICATIONS.md). The socket timeout
+is per network I/O; SMTP can add latency and bootstrap failures before authentication
+remain file/PHP-only. Monolog deduplication was inspected and application-level
+state chosen to distinguish failed attempts from successful sends.
 
 ## Phase 9 — package-based extension example
 
@@ -555,7 +565,7 @@ and logging/notification failure paths are tested on PHP 8.2.
 - [x] **Milestone B:** operation registry, migrated destinations, thin entry point
       (phases 4–6).
 - [x] **Milestone C:** Monolog events and rotating logs (phase 7).
-- [ ] **Milestone D:** failure notification emails and suppression (phase 8).
+- [x] **Milestone D:** failure notification emails and suppression (phase 8).
 - [ ] **Milestone E:** package example, documentation, regression checks, rollout
       (phases 9–10).
 

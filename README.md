@@ -28,15 +28,15 @@ processing before forwarding. The hub currently has no queue or automatic retry.
 
 See the [implementation plan](docs/IMPLEMENTATION_PLAN.md) for the planned
 package-based extensions, Monolog log rotation, and failure notification emails.
-Its checkboxes track implementation progress. Phases 1–7 are complete; the
+Its checkboxes track implementation progress. Phases 1–8 are complete; the
 [compatibility baseline](docs/COMPATIBILITY_BASELINE.md) records current behavior
 and the regression checks that later refactoring must preserve.
 
 The live webhook now runs storage, email, and Todoist through the operation
 registry and their adapters/factories. `WebhookHub` coordinates requests, while the
 response builder preserves legacy fields and adds per-operation results. Monolog
-records structured lifecycle events with rotation and retention. Failure notification
-emails and package examples remain later-phase work.
+records structured lifecycle events with rotation and retention. Optional failure notification emails use separate SMTP settings and persistent
+cooldown state. Package examples remain later-phase work.
 
 ## Requirements
 
@@ -85,7 +85,8 @@ autoloaded by Composer under the `Pebble\` namespace:
 - `config/operations.php`: declares destination IDs, switches, order, and failure policy for the operation pipeline.
 - `src/Operation/`: operation contracts, lazy registry, typed results, and destination-independent runner; see the [operation contract](docs/OPERATIONS.md).
 - `src/Bootstrap.php`: loads the environment once and constructs enabled services without executing them.
-- `src/Config/`: separate core, storage, email, Todoist, and logging settings with shared validation; `WebhookConfig` aggregates them. `AlertConfig` prepares failure notification settings for Phase 8.
+- `src/Config/`: separate core, storage, email, Todoist, and logging settings with shared validation; `WebhookConfig` aggregates them. `AlertConfig` validates independent operator notification settings.
+- `src/Notification/`: aggregates operator alerts and locks persistent cooldown state.
 - `src/Logging/`: Monolog factories, private rotating handlers, redaction, and guarded PHP fallback logging.
 - `src/Services/RequestValidator.php`: checks authentication and multipart payloads.
 - `src/Services/RecordingStorage.php`: copies recordings and cleans incomplete writes.
@@ -291,8 +292,23 @@ Debug mode continues to suppress failure messages in `mail-status.txt`.
 Failed log writes use sanitized native PHP logging without changing delivery or
 HTTP responses. Missing dependencies or malformed configuration also use a minimal
 bootstrap fallback. See [logging settings and limitations](docs/LOGGING.md),
-including runtime error handling and errors before bootstrap. Failure notification
-emails are planned for Phase 8 and are not enabled yet.
+including runtime error handling and errors before bootstrap.
+
+## Failure notification emails
+
+Set `FAILURE_EMAIL_ENABLED=true` to send one aggregated operator alert for
+reportable configuration or operation failures. Configure the separate
+`FAILURE_EMAIL_SMTP_*`, sender, and comma-separated recipients in `.env.example`.
+Alerts use verified TLS, exclude note content and credentials, and include request
+ID, failed stages, partial results, external IDs, and retained-folder references.
+
+Alerts work independently of note email and file logging. Debug mode suppresses
+them unless `FAILURE_EMAIL_IN_DEBUG=true`. Bad tokens, non-POST requests, and
+malformed input never trigger alerts. Repeated failures use a persistent cooldown
+(default 300 seconds); failed SMTP attempts get a shorter 30-second retry window.
+Notification failures preserve the original HTTP status and operation results.
+Use a separate provider to report note SMTP outages. See [notification settings
+and limitations](docs/NOTIFICATIONS.md), including synchronous delivery latency.
 
 ## Manual check
 
@@ -307,9 +323,11 @@ php tests/operations.php
 php tests/destinations.php
 php tests/hub.php
 php tests/logging.php
+php tests/notifications.php
 python3 tests/http.py
 python3 tests/bootstrap_http.py
 python3 tests/logging_http.py
+python3 tests/notifications_http.py
 ```
 
 Then use Pebble or a multipart request such as this (use your actual token,

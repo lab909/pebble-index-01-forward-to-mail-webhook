@@ -6,7 +6,7 @@ namespace Pebble\Config;
 use Symfony\Component\Mime\Address;
 use Throwable;
 
-/** Failure notification settings for Phase 8; parsing does not enable delivery. */
+/** Separate transport and private cooldown settings for failure notifications. */
 final readonly class AlertConfig
 {
     public function __construct(
@@ -34,9 +34,13 @@ final readonly class AlertConfig
         } catch (Throwable) {
             throw new ConfigurationException('Invalid failure email sender or recipients.');
         }
+        $subject = $environment->string('FAILURE_EMAIL_SUBJECT_PREFIX', 'Pebble Hub failure');
+        if (preg_match('/[\r\n\x00]/', $subject)) {
+            throw new ConfigurationException('Invalid configuration: FAILURE_EMAIL_SUBJECT_PREFIX.');
+        }
         return new self(
             SmtpConfig::fromEnvironment($environment, 'FAILURE_EMAIL_SMTP_'), $from, $recipients,
-            $environment->string('FAILURE_EMAIL_SUBJECT_PREFIX', 'Pebble Hub failure'),
+            $subject,
             $environment->choice('FAILURE_EMAIL_LEVEL', ['debug', 'info', 'notice', 'warning', 'error', 'critical', 'alert', 'emergency'], 'error'),
             $environment->boolean('FAILURE_EMAIL_IN_DEBUG', false),
             $environment->integer('FAILURE_EMAIL_COOLDOWN_SECONDS', 0, PHP_INT_MAX, 300),

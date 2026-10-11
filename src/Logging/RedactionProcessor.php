@@ -7,13 +7,13 @@ use Monolog\LogRecord;
 
 final readonly class RedactionProcessor
 {
-    public function __construct(private Redactor $redactor) {}
+    public function __construct(private Redactor $redactor, private bool $privateContent = false) {}
 
     public function __invoke(LogRecord $record): LogRecord
     {
         $truncated = false;
-        $message = $this->redactor->text($record->message, $truncated);
-        $context = $this->redactor->value($record->context, $truncated);
+        $message = $this->redactor->text($record->message, $truncated, $this->privateContent);
+        $context = $this->redactor->value($record->context, $truncated, privateContent: $this->privateContent);
         $extra = $this->redactor->value($record->extra, $truncated);
         if ($truncated) {
             $extra['diagnosticsTruncated'] = true;

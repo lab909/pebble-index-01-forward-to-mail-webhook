@@ -27,6 +27,7 @@ final readonly class WebhookHub
     {
         $started = hrtime(true);
         $response = $this->process($request)->withRequestId($this->requestId);
+        $this->bootstrap->finalizeNotifications();
         if ($this->bootstrap->hasLogging()) {
             SafeLog::write($this->bootstrap->hubLogger($this->requestId), 'info', 'Webhook request completed.',
                 ['event' => 'hub_completed', 'httpStatus' => $response->status,
@@ -68,6 +69,7 @@ final readonly class WebhookHub
                 $this->reject($failure->status, $failure->body['error']);
                 return $failure;
             }
+            $this->bootstrap->configureNotifications($values, $this->requestId);
             SafeLog::write($this->bootstrap->hubLogger($this->requestId), 'info', 'Webhook request accepted.',
                 ['event' => 'request_accepted']);
             try {
@@ -85,6 +87,17 @@ final readonly class WebhookHub
             }
             SafeLog::write($this->bootstrap->hubLogger($this->requestId), 'critical', 'Webhook configuration or bootstrap failed.',
                 ['event' => 'bootstrap_failed', 'httpStatus' => 500, 'errorCategory' => 'configuration', 'reason' => $configurationError ?? 'Invalid configuration or dependencies.']);
+            // Configure alerts for an early logging failure only when this is
+            // still an authenticated, well-formed request. Rejections never email.
+            try {
+                if (isset($environment, $values)
+                    && (new RequestValidator(CoreConfig::token($environment)))->validate($request) === null) {
+                    if (!$this->bootstrap->hasLogging()) {
+                        $this->bootstrap->configureNotifications($values, $this->requestId);
+                    }
+                    $this->bootstrap->notificationFailure($configurationError ?? 'Invalid configuration or dependencies.');
+                }
+            } catch (Throwable) {}
             return new Response(500, ['error' => $configurationError
                 ?? 'Check .env configuration, SMTP settings, and Composer dependencies.']);
         }
@@ -98,9 +111,11 @@ final readonly class WebhookHub
             } catch (Throwable) {
                 SafeLog::write($this->bootstrap->hubLogger($this->requestId), 'critical', 'Note preparation failed.',
                     ['event' => 'note_preparation_failed', 'httpStatus' => 500, 'errorCategory' => 'unexpected']);
+                $this->bootstrap->notificationFailure('Note preparation failed.');
                 return new Response(500, ['error' => 'Unable to process webhook. Check recording data and storage directory permissions.']);
             }
             $report = $note === null ? new ExecutionReport([], [], []) : $services->runner->run($note);
+            $this->bootstrap->notificationReport($report);
             $services->outcomeRecorder->record($report, $config->debugMode);
             return $this->responses->fromReport($report, $config->debugMode);
         } finally {

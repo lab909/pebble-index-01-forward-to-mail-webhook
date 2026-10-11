@@ -21,11 +21,13 @@ final class Bootstrap
     private ?LoggerFactory $loggers = null;
     private ?LoggingConfig $logging = null;
     private ?Redactor $redactor = null;
+    private ?\Pebble\Notification\FailureNotifier $notifications = null;
 
     public function __construct(
         private readonly string $projectDirectory,
         private readonly ?Closure $todoistClientFactory = null,
         private readonly ?LoggerInterface $logger = null,
+        private readonly ?Closure $alertMailerFactory = null,
     ) {
     }
 
@@ -99,6 +101,59 @@ final class Bootstrap
     public function protectNote(\Pebble\Note\Note $note): void
     {
         $this->redactor?->protectNote($note);
+    }
+
+    public function configureNotifications(array $values, string $requestId): void
+    {
+        $environment = new Environment($this->projectDirectory, $values);
+        try {
+            if (!$environment->boolean('FAILURE_EMAIL_ENABLED', false)) { return; }
+            $debug = $environment->boolean('DEBUG_MODE', false);
+            if ($debug && !$environment->boolean('FAILURE_EMAIL_IN_DEBUG', false)) { return; }
+            $config = \Pebble\Config\AlertConfig::fromEnvironment($environment);
+            (new \Pebble\Notification\CooldownStore($config->stateDirectory))->prepare();
+            try { $timezone = new \DateTimeZone($environment->string('APP_TIMEZONE', 'UTC')); }
+            catch (\Throwable) { $timezone = new \DateTimeZone('UTC'); }
+            $this->redactor ??= new Redactor($values, $requestId);
+            $this->notifications = new \Pebble\Notification\FailureNotifier($config, $requestId, $timezone,
+                $this->redactor, fn () => $this->notificationLogger($values, $requestId), $this->alertMailerFactory);
+        } catch (\Throwable $exception) {
+            // Invalid alert credentials never stop normal webhook operations.
+            \Pebble\Services\SafeLog::write($this->notificationLogger($values, $requestId), 'error',
+                'Invalid failure notification configuration or state directory.',
+                ['event' => 'notification_configuration_failed',
+                    'reason' => $exception instanceof \Pebble\Config\ConfigurationException ? $exception->getMessage() : 'Cannot prepare private notification state.']);
+        }
+    }
+
+    private function notificationLogger(array $values, string $requestId): LoggerInterface
+    {
+        if ($this->loggers !== null) {
+            return new RequestLogger($this->loggers->create('notifications'), $requestId);
+        }
+        try {
+            $environment = new Environment($this->projectDirectory, $values);
+            if (!$environment->boolean('LOG_ENABLED', true)
+                || ($environment->boolean('DEBUG_MODE', false) && !$environment->boolean('LOG_IN_DEBUG', false))) {
+                return new NullLogger();
+            }
+        } catch (\Throwable) { return new NullLogger(); }
+        return new RequestLogger(new \Pebble\Logging\NativeLogger(new Redactor($values, $requestId)), $requestId);
+    }
+
+    public function notificationReport(\Pebble\Operation\ExecutionReport $report): void
+    {
+        try { $this->notifications?->report($report); } catch (\Throwable) {}
+    }
+
+    public function notificationFailure(string $reason): void
+    {
+        $this->notifications?->configurationFailure($reason);
+    }
+
+    public function finalizeNotifications(): void
+    {
+        try { $this->notifications?->finalize(); } catch (\Throwable) {}
     }
 
     public function dependencies(RequestContext $context): OperationDependencies

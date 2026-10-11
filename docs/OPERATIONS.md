@@ -4,7 +4,9 @@ Phases 4–6 provide the operation contract, registry/runner, built-in destinati
 adapters/factories, and HTTP integration. `WebhookHub` coordinates the request, and
 `ResponseBuilder` formats execution reports with an explicit `LegacyResultMapper`.
 The public entry point has no destination-specific branches.
-Monolog lifecycle logging is implemented; failure notifications remain Phase 8.
+Monolog lifecycle logging and optional operator failure notifications are implemented.
+The hub finalizes aggregated alerts before returning the response; operation services
+do not send operator alerts. See [notification policy](NOTIFICATIONS.md).
 
 ## Registration and construction
 
